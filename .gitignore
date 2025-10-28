@@ -27,3 +27,6 @@ __pycache__/
 # Archivos de IDE
 .idea/
 .vscode/
+
+# Airflow Configuration
+config/airflow.cfg
