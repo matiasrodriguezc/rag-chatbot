@@ -1,0 +1,29 @@
+# Python Virtual Environment
+# Ignora tu carpeta venv_app local
+venv_app/
+
+# Secretos
+.env
+
+# Base de Datos Vectorial Generada
+dags/cv_vector_db/
+
+# Logs de Airflow
+logs/
+
+# Archivos temporales
+temp_cv.pdf
+temp_cv_*.pdf
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos de macOS
+.DS_Store
+
+# Archivos de IDE
+.idea/
+.vscode/
