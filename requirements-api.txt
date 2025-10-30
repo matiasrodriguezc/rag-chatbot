@@ -1,9 +1,15 @@
+# Archivo: requirements-api.txt (CORREGIDO)
 fastapi
-uvicorn
-langchain-google-genai
-langchain-community
+uvicorn[standard]
 python-dotenv
-chromadb
-pydantic
 requests
+pypdf
+
+# Nuevas librerías de LangChain (correctas)
+langchain-google-genai
+langchain-huggingface
 langchain-text-splitters
+langchain-chroma
+
+# Dependencia para embeddings locales
+sentence-transformers

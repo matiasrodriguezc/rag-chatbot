@@ -7,3 +7,5 @@ requests
 python-dotenv
 chromadb
 langchain-text-splitters
+langchain-huggingface
+sentence-transformers

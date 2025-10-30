@@ -1,23 +1,28 @@
+# --- Archivo: dags/pipeline/cv_etl.py (CORREGIDO - LAZY IMPORTS) ---
+
 import os
 import requests
 import sys
 from dotenv import load_dotenv
 load_dotenv() 
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters.character import CharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
-
-# --- CONFIGURACIÓN (AHORA PARA UN SOLO CV) ---
+# --- CONFIGURACIÓN ---
 CV_RAW_URL = "https://raw.githubusercontent.com/matiasrodriguezc/portfolio/main/assets/CV-ES%20-%20MR.pdf"
 CV_FILENAME = "CV-ES.pdf"
 LOCAL_CV_PATH = "./temp_cv.pdf"
-
-# Esta es la ruta DENTRO del contenedor de Docker (donde Airflow escribe)
 CHROMA_DIR = "/opt/airflow/dags/cv_vector_db"
-EMBEDDING_MODEL = "models/embedding-001"
+EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 # -----------------------------------------------
+
+def get_embedding_model():
+    """Carga el modelo de embedding local."""
+    # --- IMPORT PESADO MOVIDO ADENTRO ---
+    from langchain_huggingface import HuggingFaceEmbeddings
+    
+    return HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={'device': 'cpu'} 
+    )
 
 def descargar_cv_de_github():
     """Descarga el CV de GitHub."""
@@ -34,8 +39,11 @@ def descargar_cv_de_github():
 
 def extraer_y_dividir_texto():
     """Carga el PDF local, lo limpia y lo divide en chunks."""
-    print(f"Cargando y dividiendo texto de {CV_FILENAME}...")
+    # --- IMPORTS PESADOS MOVIDOS ADENTRO ---
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_text_splitters.character import CharacterTextSplitter
     
+    print(f"Cargando y dividiendo texto de {CV_FILENAME}...")
     loader_pdf = PyPDFLoader(LOCAL_CV_PATH)
     pages_pdf = loader_pdf.load()
     
@@ -43,22 +51,22 @@ def extraer_y_dividir_texto():
         page.page_content = ' '.join(page.page_content.split())
         page.metadata['source'] = CV_FILENAME
 
-    char_splitter = CharacterTextSplitter(
-                                    separator = ".", 
-                                    chunk_size = 500, 
-                                    chunk_overlap = 50)
-    
+    char_splitter = CharacterTextSplitter(separator = ".", chunk_size = 500, chunk_overlap = 50)
     chunks = char_splitter.split_documents(pages_pdf)
     print(f"Total de chunks generados: {len(chunks)}")
     return chunks
 
 def borrar_vectores_viejos():
     """Borra todos los vectores antiguos del CV de la DB."""
+    # --- IMPORT PESADO MOVIDO ADENTRO ---
+    from langchain_community.vectorstores import Chroma
+
     print(f"Borrando vectores antiguos de {CV_FILENAME}...")
     try:
+        embedding_function = get_embedding_model()
         vectorstore = Chroma(
             persist_directory=CHROMA_DIR, 
-            embedding_function=GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+            embedding_function=embedding_function
         )
         
         ids_a_borrar = []
@@ -73,20 +81,23 @@ def borrar_vectores_viejos():
             print(f"No se encontraron vectores antiguos para '{CV_FILENAME}'.")
             
     except Exception as e:
-        print(f"Error borrando vectores (puede que sea la primera ejecución): {e}")
+        print(f"Error borrando vectores (puede ser la primera ejecución): {e}")
 
 def crear_y_almacenar_vectores(chunks):
     """Toma los chunks de texto y los almacena en Chroma."""
+    # --- IMPORT PESADO MOVIDO ADENTRO ---
+    from langchain_community.vectorstores import Chroma
+    
     if not chunks:
         print("No hay chunks para almacenar.")
         return
         
-    print(f"Creando y almacenando {len(chunks)} nuevos vectores...")
-    embedding = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+    print(f"Creando y almacenando {len(chunks)} nuevos vectores (esto puede tardar)...")
+    embedding_function = get_embedding_model()
     
     vectorstore = Chroma.from_documents(
                                     documents = chunks, 
-                                    embedding = embedding, 
+                                    embedding = embedding_function,
                                     persist_directory = CHROMA_DIR)
     print("¡Nuevos vectores almacenados exitosamente!")
 

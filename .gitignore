@@ -5,8 +5,6 @@ venv_app/
 # Secretos
 .env
 
-# Base de Datos Vectorial Generada
-dags/cv_vector_db/
 
 # Logs de Airflow
 logs/
