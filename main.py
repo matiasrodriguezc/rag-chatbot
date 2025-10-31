@@ -46,20 +46,22 @@ class Pregunta(BaseModel):
 # --- Lógica de Carga (Lazy Loading) ---
 # Mantenemos las funciones de carga separadas para no alentar el inicio
 def get_embedding_model():
-    """Usa la API de Inferencia de Hugging Face."""
-    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-    # Render/Uvicorn leerán la API key desde las variables de entorno
+    """Usa la API de Inferencia de Hugging Face (método nuevo)."""
+    from langchain_huggingface import HuggingFaceEndpointEmbeddings
+    
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
-        # Intenta leerla desde el .env si no está en el entorno
         from dotenv import load_dotenv
         load_dotenv()
         hf_token = os.environ.get("HF_TOKEN")
         if not hf_token:
             raise ValueError("HF_TOKEN no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
-    return HuggingFaceInferenceAPIEmbeddings(
+
+    return HuggingFaceEndpointEmbeddings(
         api_key=hf_token,
-        model_name=EMBEDDING_MODEL_NAME 
+        model=EMBEDDING_MODEL_NAME,
+        # --- AÑADE ESTA LÍNEA ---
+        endpoint_url="https://router.huggingface.co/hf-inference/"
     )
 
 def get_rag_chain():
