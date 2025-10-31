@@ -15,17 +15,18 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 # -----------------------------------------------
 
 def get_embedding_model():
-    """Usa la API de Inferencia de Hugging Face (método nuevo)."""
-    from langchain_huggingface import HuggingFaceEndpointEmbeddings 
+    """Usa la API de Inferencia de Hugging Face (Clase Correcta)."""
+    # Importamos la clase correcta DESDE el nuevo paquete
+    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings 
+    
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise ValueError("HF_TOKEN no encontrada en las variables de entorno")
 
-    return HuggingFaceEndpointEmbeddings(
-        api_key=hf_token,
-        model=EMBEDDING_MODEL_NAME,
-        # --- AÑADE ESTA LÍNEA ---
-        endpoint_url="https://router.huggingface.co/hf-inference/"
+    return HuggingFaceInferenceAPIEmbeddings(
+        api_key=hf_token,               # Esta clase SÍ acepta 'api_key'
+        model_name=EMBEDDING_MODEL_NAME, # Esta clase usa 'model_name'
+        api_url="https://router.huggingface.co/hf-inference/" # Esta clase usa 'api_url'
     )
 
 def descargar_cv_de_github():
