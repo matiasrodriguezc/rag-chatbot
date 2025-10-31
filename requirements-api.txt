@@ -13,3 +13,5 @@ langchain-chroma
 
 # Dependencia para embeddings locales
 sentence-transformers
+
+huggingface_hub

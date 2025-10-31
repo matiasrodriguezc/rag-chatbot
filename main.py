@@ -2,6 +2,7 @@ import asyncio
 from fastapi import FastAPI
 from pydantic import BaseModel
 import sys
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -45,10 +46,20 @@ class Pregunta(BaseModel):
 # --- Lógica de Carga (Lazy Loading) ---
 # Mantenemos las funciones de carga separadas para no alentar el inicio
 def get_embedding_model():
-    """Carga el modelo de embedding local."""
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={'device': 'cpu'}
+    """Usa la API de Inferencia de Hugging Face."""
+    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
+    # Render/Uvicorn leerán la API key desde las variables de entorno
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        # Intenta leerla desde el .env si no está en el entorno
+        from dotenv import load_dotenv
+        load_dotenv()
+        hf_token = os.environ.get("HF_TOKEN")
+        if not hf_token:
+            raise ValueError("HF_TOKEN no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
+    return HuggingFaceInferenceAPIEmbeddings(
+        api_key=hf_token,
+        model_name=EMBEDDING_MODEL_NAME 
     )
 
 def get_rag_chain():

@@ -9,3 +9,4 @@ chromadb
 langchain-text-splitters
 langchain-huggingface
 sentence-transformers
+huggingface_hub

@@ -15,13 +15,15 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 # -----------------------------------------------
 
 def get_embedding_model():
-    """Carga el modelo de embedding local."""
-    # --- IMPORT PESADO MOVIDO ADENTRO ---
-    from langchain_huggingface import HuggingFaceEmbeddings
-    
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={'device': 'cpu'} 
+    """Usa la API de Inferencia de Hugging Face."""
+    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
+    # Render/Airflow leerán la API key desde las variables de entorno
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        raise ValueError("HF_TOKEN no encontrada en las variables de entorno")
+    return HuggingFaceInferenceAPIEmbeddings(
+        api_key=hf_token,
+        model_name=EMBEDDING_MODEL_NAME 
     )
 
 def descargar_cv_de_github():
