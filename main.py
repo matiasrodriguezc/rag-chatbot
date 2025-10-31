@@ -47,7 +47,7 @@ class Pregunta(BaseModel):
 # Mantenemos las funciones de carga separadas para no alentar el inicio
 def get_embedding_model():
     """Usa la API de Inferencia de Hugging Face."""
-    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
+    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
     # Render/Uvicorn leerán la API key desde las variables de entorno
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:

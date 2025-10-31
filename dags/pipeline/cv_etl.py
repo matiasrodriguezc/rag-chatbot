@@ -16,8 +16,7 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 
 def get_embedding_model():
     """Usa la API de Inferencia de Hugging Face."""
-    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
-    # Render/Airflow leerán la API key desde las variables de entorno
+    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings    # Render/Airflow leerán la API key desde las variables de entorno
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise ValueError("HF_TOKEN no encontrada en las variables de entorno")
