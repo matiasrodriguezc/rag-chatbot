@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # --- CONFIGURACIÓN ---
 # La API (local) lee la DB de la carpeta 'dags'
 CHROMA_DIR = "./dags/cv_vector_db"
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 app = FastAPI(title="Chatbot de CV")
 

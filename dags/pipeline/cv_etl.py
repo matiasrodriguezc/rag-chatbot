@@ -11,7 +11,7 @@ CV_RAW_URL = "https://raw.githubusercontent.com/matiasrodriguezc/portfolio/main/
 CV_FILENAME = "CV-ES.pdf"
 LOCAL_CV_PATH = "./temp_cv.pdf"
 CHROMA_DIR = "/opt/airflow/dags/cv_vector_db"
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # -----------------------------------------------
 
 def get_embedding_model():
