@@ -1,0 +1,24 @@
+# Dockerfile.api - Para deploy en Vercel/Railway/etc
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instala dependencias del sistema mínimas
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiamos requirements de la API
+COPY requirements-api.txt /app/requirements.txt
+
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copiamos el código
+COPY main.py /app/
+COPY .env /app/.env 2>/dev/null || true
+
+# Puerto en el que corre uvicorn
+EXPOSE 8000
+
+# Comando de arranque
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

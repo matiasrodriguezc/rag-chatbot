@@ -1,0 +1,39 @@
+name: Actualizar CV en Vector DB
+
+on:
+  schedule:
+    # Ejecuta todos los días a las 03:00 UTC (medianoche en Argentina)
+    - cron: "0 3 * * *"
+  workflow_dispatch:  # Permite ejecutarlo manualmente desde GitHub
+
+jobs:
+  update-cv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ETL Pipeline
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: |
+          cd dags/pipeline
+          python run_etl.py
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "El pipeline de actualización de CV falló. Revisa los logs."
