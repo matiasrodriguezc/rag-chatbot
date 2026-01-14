@@ -122,10 +122,6 @@ docker run -d -p 8000:8000 --env-file .env rag-chatbot-api
 
 ```
 
-## 🤝 Contributing
-
-Contributions are welcome! This project serves as a demonstration of software engineering applied to AI. Feel free to open issues or submit PRs.
-
 ## 📄 License
 
 This project is licensed under the MIT License.
