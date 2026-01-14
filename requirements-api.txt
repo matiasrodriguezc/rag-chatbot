@@ -9,7 +9,10 @@ pypdf
 langchain-google-genai
 langchain-huggingface
 langchain-text-splitters
-langchain-chroma
+langchain-pinecone
+
+# Pinecone
+pinecone-client
 
 # Dependencia para embeddings locales
 sentence-transformers

@@ -1,5 +1,3 @@
-# --- Archivo: dags/pipeline/cv_etl.py (CORREGIDO - LAZY IMPORTS) ---
-
 import os
 import requests
 import sys
@@ -10,19 +8,23 @@ load_dotenv()
 CV_RAW_URL = "https://raw.githubusercontent.com/matiasrodriguezc/portfolio/main/assets/CV-ES%20-%20MR.pdf"
 CV_FILENAME = "CV-ES.pdf"
 LOCAL_CV_PATH = "./temp_cv.pdf"
-CHROMA_DIR = "/opt/airflow/dags/cv_vector_db"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Configuración de Pinecone
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
+
+if not PINECONE_API_KEY:
+    raise ValueError("PINECONE_API_KEY no encontrada en las variables de entorno")
 # -----------------------------------------------
 
 def get_embedding_model():
     """Usa la API de Inferencia de Hugging Face (Clase y Parámetros Correctos)."""
     # Usamos la clase que nos recomendó la advertencia
     from langchain_huggingface import HuggingFaceEndpointEmbeddings 
-    
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise ValueError("HF_TOKEN no encontrada en las variables de entorno")
-
     return HuggingFaceEndpointEmbeddings(
         # El nombre correcto del parámetro es 'huggingfacehub_api_token'
         huggingfacehub_api_token=hf_token,  
@@ -48,64 +50,51 @@ def extraer_y_dividir_texto():
     # --- IMPORTS PESADOS MOVIDOS ADENTRO ---
     from langchain_community.document_loaders import PyPDFLoader
     from langchain_text_splitters.character import CharacterTextSplitter
-    
     print(f"Cargando y dividiendo texto de {CV_FILENAME}...")
     loader_pdf = PyPDFLoader(LOCAL_CV_PATH)
     pages_pdf = loader_pdf.load()
-    
     for page in pages_pdf:
         page.page_content = ' '.join(page.page_content.split())
         page.metadata['source'] = CV_FILENAME
-
     char_splitter = CharacterTextSplitter(separator = ".", chunk_size = 500, chunk_overlap = 50)
     chunks = char_splitter.split_documents(pages_pdf)
     print(f"Total de chunks generados: {len(chunks)}")
     return chunks
 
 def borrar_vectores_viejos():
-    """Borra todos los vectores antiguos del CV de la DB."""
+    """Borra todos los vectores antiguos del CV de Pinecone."""
     # --- IMPORT PESADO MOVIDO ADENTRO ---
-    from langchain_community.vectorstores import Chroma
-
+    from pinecone import Pinecone
     print(f"Borrando vectores antiguos de {CV_FILENAME}...")
     try:
-        embedding_function = get_embedding_model()
-        vectorstore = Chroma(
-            persist_directory=CHROMA_DIR, 
-            embedding_function=embedding_function
-        )
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        index = pc.Index(PINECONE_INDEX_NAME)
         
-        ids_a_borrar = []
-        for doc_id in vectorstore.get(where={'source': CV_FILENAME})['ids']:
-             ids_a_borrar.append(doc_id)
-
-        if ids_a_borrar:
-            print(f"Encontrados {len(ids_a_borrar)} vectores para borrar.")
-            vectorstore.delete(ids=ids_a_borrar)
-            print("Vectores antiguos borrados.")
-        else:
-            print(f"No se encontraron vectores antiguos para '{CV_FILENAME}'.")
+        # Usar delete con filter para borrar todos los vectores con source = CV_FILENAME
+        # Esto es más eficiente que listar y borrar individualmente
+        index.delete(filter={"source": CV_FILENAME})
+        print(f"Vectores antiguos de '{CV_FILENAME}' borrados exitosamente.")
             
     except Exception as e:
-        print(f"Error borrando vectores (puede ser la primera ejecución): {e}")
+        print(f"Error borrando vectores (puede ser la primera ejecución o no hay vectores): {e}")
 
 def crear_y_almacenar_vectores(chunks):
-    """Toma los chunks de texto y los almacena en Chroma."""
+    """Toma los chunks de texto y los almacena en Pinecone."""
     # --- IMPORT PESADO MOVIDO ADENTRO ---
-    from langchain_community.vectorstores import Chroma
-    
+    from langchain_pinecone import PineconeVectorStore
     if not chunks:
         print("No hay chunks para almacenar.")
         return
-        
-    print(f"Creando y almacenando {len(chunks)} nuevos vectores (esto puede tardar)...")
+    print(f"Creando y almacenando {len(chunks)} nuevos vectores en Pinecone (esto puede tardar)...")
     embedding_function = get_embedding_model()
     
-    vectorstore = Chroma.from_documents(
-                                    documents = chunks, 
-                                    embedding = embedding_function,
-                                    persist_directory = CHROMA_DIR)
-    print("¡Nuevos vectores almacenados exitosamente!")
+    # Usar PineconeVectorStore para almacenar los documentos
+    vectorstore = PineconeVectorStore.from_documents(
+        documents=chunks,
+        embedding=embedding_function,
+        index_name=PINECONE_INDEX_NAME,
+    )
+    print("¡Nuevos vectores almacenados exitosamente en Pinecone!")
 
 def limpiar_archivo_local():
     """Borra el archivo PDF temporal."""

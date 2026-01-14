@@ -9,19 +9,21 @@ load_dotenv()
 from fastapi.responses import StreamingResponse
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+from langchain_pinecone import PineconeVectorStore
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.middleware.cors import CORSMiddleware
-
-
 # --- CONFIGURACIÓN ---
-# La API (local) lee la DB de la carpeta 'dags'
-CHROMA_DIR = "./dags/cv_vector_db"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Configuración de Pinecone
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
+
+if not PINECONE_API_KEY:
+    raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
 
 app = FastAPI(title="Chatbot de CV")
 
@@ -32,7 +34,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://matiasrodriguezc.github.io" # <-- ¡Permite tu portafolio!
+        "https://matiasrodriguezc.github.io"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -43,8 +45,7 @@ app.add_middleware(
 class Pregunta(BaseModel):
     texto: str
 
-# --- Lógica de Carga (Lazy Loading) ---
-# Mantenemos las funciones de carga separadas para no alentar el inicio
+# --- Lógica de Carga ---
 def get_embedding_model():
     """Usa la API de Inferencia de Hugging Face (Clase y Parámetros Correctos)."""
     # Usamos la clase que nos recomendó la advertencia
@@ -57,11 +58,8 @@ def get_embedding_model():
         hf_token = os.environ.get("HF_TOKEN")
         if not hf_token:
             raise ValueError("HF_TOKEN no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
-
     return HuggingFaceEndpointEmbeddings(
-        # El nombre correcto del parámetro es 'huggingfacehub_api_token'
         huggingfacehub_api_token=hf_token,  
-        # El nombre correcto del parámetro es 'model'
         model=EMBEDDING_MODEL_NAME
     )
 
@@ -69,12 +67,13 @@ def get_rag_chain():
     """Construye y devuelve la cadena RAG completa."""
     embedding_function = get_embedding_model()
     
-    vectorstore = Chroma(
-                    persist_directory = CHROMA_DIR, 
-                    embedding_function = embedding_function)
+    # Conectar a Pinecone usando el índice existente
+    vectorstore = PineconeVectorStore.from_existing_index(
+        index_name=PINECONE_INDEX_NAME,
+        embedding=embedding_function,
+    )
     
-    retriever = vectorstore.as_retriever(search_type = 'mmr', search_kwargs = {'k':5, 'lambda_mult':0.7})
-
+    retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k':5, 'lambda_mult':0.7})
     TEMPLATE = '''
     Responde la pregunta del usuario de forma breve y concisa, usando únicamente el contexto proporcionado.
     Tu respuesta debe ir directo al grano.
@@ -95,8 +94,7 @@ def get_rag_chain():
                     model="gemini-2.5-flash",
                     temperature=0.1,
                     max_tokens = 500
-                    # No necesitamos los safety_settings si funcionó sin ellos
-                )
+            )
 
     chain = ({'context': retriever, 
             'question': RunnablePassthrough()} 
@@ -111,13 +109,11 @@ async def stream_rag_response(pregunta_texto: str):
     """Generador asíncrono para la respuesta del chat."""
     try:
         rag_chain = get_rag_chain()
-        
         # .astream() es la versión asíncrona de .stream()
         # Esto devuelve los "chunks" (palabras/tokens) a medida que el LLM los genera
         async for chunk in rag_chain.astream(pregunta_texto):
             yield chunk
             await asyncio.sleep(0.01) # Pequeña pausa para el "efecto" de streaming
-            
     except Exception as e:
         print(f"Error durante el streaming: {e}")
         yield "Lo siento, ocurrió un error al procesar la respuesta."

@@ -1,30 +1,47 @@
 # Python Virtual Environment
 # Ignora tu carpeta venv_app local
 venv_app/
+venv/
+env/
+.venv/
 
 # Secretos
 .env
+.env.local
 
-
-# Logs de Airflow
+# Logs de Airflow (ya no se usa Airflow)
 logs/
+
+# Base de datos vectorial local (ya migrado a Pinecone)
+dags/cv_vector_db/
 
 # Archivos temporales
 temp_cv.pdf
 temp_cv_*.pdf
+*.pdf
 
 # Python Cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py[cod]
+*$py.class
 
 # Archivos de macOS
 .DS_Store
+.AppleDouble
+.LSOverride
 
 # Archivos de IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
 
-# Airflow Configuration
+# Airflow Configuration (ya no se usa)
 config/airflow.cfg
+
+# Docker
+.dockerignore

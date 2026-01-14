@@ -5,8 +5,9 @@ langchain-google-genai
 pypdf
 requests
 python-dotenv
-chromadb
 langchain-text-splitters
 langchain-huggingface
+langchain-pinecone
+pinecone-client
 sentence-transformers
 huggingface_hub

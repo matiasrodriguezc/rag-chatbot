@@ -15,10 +15,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copiamos el código
 COPY main.py /app/
-COPY .env /app/.env 2>/dev/null || true
 
-# Puerto en el que corre uvicorn
-EXPOSE 8000
+# Puerto dinámico (Railway usa $PORT, Vercel usa 8000)
+ENV PORT=8000
+EXPOSE $PORT
 
-# Comando de arranque
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando de arranque (usa PORT si está disponible)
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
