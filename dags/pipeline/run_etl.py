@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cv_etl import (
-    descargar_cv_de_github,
+    descargar_cv_de_google_docs,
     extraer_y_dividir_texto,
     borrar_vectores_viejos,
     crear_y_almacenar_vectores,
@@ -24,7 +24,7 @@ def main():
         print("=" * 50)
         
         # Paso 1: Descargar CV desde GitHub
-        descargar_cv_de_github()
+        descargar_cv_de_google_docs()
         
         # Paso 2: Extraer y dividir texto
         chunks = extraer_y_dividir_texto()

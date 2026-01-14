@@ -4,10 +4,12 @@ import sys
 from dotenv import load_dotenv
 load_dotenv() 
 
-# --- CONFIGURACIÓN ---
-CV_RAW_URL = "https://raw.githubusercontent.com/matiasrodriguezc/portfolio/main/assets/CV-ES%20-%20MR.pdf"
-CV_FILENAME = "CV-ES.pdf"
-LOCAL_CV_PATH = "./temp_cv.pdf"
+# --- CONFIGURACIÓN GOOGLE DOCS ---
+DOC_ID = "1C1k0zGNiE_OqICy2PAaHsAV9zCJWY0IHn2FmfovPM28"
+CV_RAW_URL = f"https://docs.google.com/document/d/{DOC_ID}/export?format=txt"
+
+CV_FILENAME = "matias_background.txt"
+LOCAL_CV_PATH = "./matias_background.txt"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Configuración de Pinecone
@@ -16,88 +18,82 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada en las variables de entorno")
-# -----------------------------------------------
 
 def get_embedding_model():
-    """Usa la API de Inferencia de Hugging Face (Clase y Parámetros Correctos)."""
-    # Usamos la clase que nos recomendó la advertencia
-    from langchain_huggingface import HuggingFaceEndpointEmbeddings 
+    from langchain_huggingface import HuggingFaceEndpointEmbeddings
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
-        raise ValueError("HF_TOKEN no encontrada en las variables de entorno")
+        raise ValueError("HF_TOKEN no encontrada")
     return HuggingFaceEndpointEmbeddings(
-        # El nombre correcto del parámetro es 'huggingfacehub_api_token'
         huggingfacehub_api_token=hf_token,  
-        # El nombre correcto del parámetro es 'model'
         model=EMBEDDING_MODEL_NAME          
     )
 
-def descargar_cv_de_github():
-    """Descarga el CV de GitHub."""
-    print(f"Descargando {CV_FILENAME} desde {CV_RAW_URL}...")
+def descargar_cv_de_google_docs():
+    """Descarga el texto plano directamente desde Google Docs."""
+    print(f"Descargando contenido desde Google Docs...")
     try:
         r = requests.get(CV_RAW_URL)
         r.raise_for_status()
+        # Guardamos el contenido. Google suele mandar UTF-8 con BOM a veces,
+        # pero al guardarlo como binary ('wb') preservamos lo que llega.
         with open(LOCAL_CV_PATH, 'wb') as f:
             f.write(r.content)
-        print(f"{CV_FILENAME} descargado.")
+        print(f"Documento guardado localmente como {CV_FILENAME}.")
     except Exception as e:
-        print(f"Error al descargar {CV_FILENAME}: {e}")
+        print(f"Error al descargar desde Google Docs: {e}")
         raise
 
 def extraer_y_dividir_texto():
-    """Carga el PDF local, lo limpia y lo divide en chunks."""
-    # --- IMPORTS PESADOS MOVIDOS ADENTRO ---
-    from langchain_community.document_loaders import PyPDFLoader
-    from langchain_text_splitters.character import CharacterTextSplitter
-    print(f"Cargando y dividiendo texto de {CV_FILENAME}...")
-    loader_pdf = PyPDFLoader(LOCAL_CV_PATH)
-    pages_pdf = loader_pdf.load()
-    for page in pages_pdf:
-        page.page_content = ' '.join(page.page_content.split())
-        page.metadata['source'] = CV_FILENAME
-    char_splitter = CharacterTextSplitter(separator = ".", chunk_size = 500, chunk_overlap = 50)
-    chunks = char_splitter.split_documents(pages_pdf)
+    """Carga el TXT local y lo divide en chunks."""
+    from langchain_community.document_loaders import TextLoader
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    print(f"Procesando texto de {CV_FILENAME}...")
+    # IMPORTANTE: encoding='utf-8' es vital para tildes y ñ que vengan de Google
+    loader = TextLoader(LOCAL_CV_PATH, encoding="utf-8")
+    docs = loader.load()
+    for doc in docs:
+        doc.metadata['source'] = "GoogleDoc_Matias" # Etiqueta personalizada
+    # Usamos RecursiveCharacterTextSplitter, ideal para textos narrativos
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    chunks = text_splitter.split_documents(docs)
     print(f"Total de chunks generados: {len(chunks)}")
     return chunks
 
+
 def borrar_vectores_viejos():
-    """Borra todos los vectores antiguos del CV de Pinecone."""
-    # --- IMPORT PESADO MOVIDO ADENTRO ---
     from pinecone import Pinecone
-    print(f"Borrando vectores antiguos de {CV_FILENAME}...")
+    print(f"Borrando vectores antiguos...")
     try:
         pc = Pinecone(api_key=PINECONE_API_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
-        
-        # Usar delete con filter para borrar todos los vectores con source = CV_FILENAME
-        # Esto es más eficiente que listar y borrar individualmente
-        index.delete(filter={"source": CV_FILENAME})
-        print(f"Vectores antiguos de '{CV_FILENAME}' borrados exitosamente.")
-            
+        # Borramos todo lo que venga de la fuente anterior o la nueva
+        # Para asegurar limpieza total, podrías borrar todo el namespace si solo usas este CV
+        index.delete(delete_all=True) 
+        print(f"Índice limpiado exitosamente.")
     except Exception as e:
-        print(f"Error borrando vectores (puede ser la primera ejecución o no hay vectores): {e}")
+        print(f"Nota sobre borrado: {e}")
+
 
 def crear_y_almacenar_vectores(chunks):
-    """Toma los chunks de texto y los almacena en Pinecone."""
-    # --- IMPORT PESADO MOVIDO ADENTRO ---
     from langchain_pinecone import PineconeVectorStore
     if not chunks:
-        print("No hay chunks para almacenar.")
         return
-    print(f"Creando y almacenando {len(chunks)} nuevos vectores en Pinecone (esto puede tardar)...")
+    print(f"Subiendo {len(chunks)} vectores a Pinecone...")
     embedding_function = get_embedding_model()
-    
-    # Usar PineconeVectorStore para almacenar los documentos
-    vectorstore = PineconeVectorStore.from_documents(
+    PineconeVectorStore.from_documents(
         documents=chunks,
         embedding=embedding_function,
         index_name=PINECONE_INDEX_NAME,
     )
-    print("¡Nuevos vectores almacenados exitosamente en Pinecone!")
+    print("¡Carga a Pinecone completada!")
+
 
 def limpiar_archivo_local():
-    """Borra el archivo PDF temporal."""
     if os.path.exists(LOCAL_CV_PATH):
         os.remove(LOCAL_CV_PATH)
-        print(f"Archivo local temporal {LOCAL_CV_PATH} borrado.")
+        print("Archivo temporal eliminado.")

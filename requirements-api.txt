@@ -3,7 +3,6 @@ fastapi
 uvicorn[standard]
 python-dotenv
 requests
-pypdf
 
 # Nuevas librerías de LangChain (correctas)
 langchain-google-genai

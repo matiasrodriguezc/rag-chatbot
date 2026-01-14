@@ -74,25 +74,31 @@ def get_rag_chain():
     )
     
     retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k':5, 'lambda_mult':0.7})
-    TEMPLATE = '''
-    Responde la pregunta del usuario de forma breve y concisa, usando únicamente el contexto proporcionado.
-    Tu respuesta debe ir directo al grano.
-    NO saludes (No digas "Hola").
-    NO uses frases introductorias (No digas "Basándome en el contexto..." o "Aquí tienes...").
-    Si la respuesta es una lista, enumérala directamente.
-    Si la respuesta no está en el contexto, di "Esa información no se encuentra en el CV de Matías. No puedo responder a eso."
+    TEMPLATE = """
+        Eres el asistente de IA personal de Matías Rodríguez. Tu trabajo es contar su experiencia profesional y académica basándote EXCLUSIVAMENTE en el contexto proporcionado.
+        
+        Reglas de Comportamiento:
+        1. **IDIOMA (CRÍTICO):** Responde SIEMPRE en el mismo idioma en el que el usuario te pregunta. 
+        - Si el usuario pregunta en Inglés -> Responde en Inglés.
+        - Si el usuario pregunta en Español -> Responde en Español.
+        
+        2. **Estilo Humano:** - NO uses listas con viñetas (*), ni guiones, ni formato de tabla.
+        - Redacta respuestas fluidas en párrafos, como si estuvieras conversando.
+        - Evita frases robóticas como "Según el documento...". Simplemente cuenta la información.
+        
+        3. **Honestidad:** Si la respuesta no está en el contexto, di amablemente que no conoces ese detalle sobre Matías (en el idioma correspondiente).
 
-    Contexto:
-    {context}
+        Contexto sobre Matías:
+        {context}
 
-    Pregunta:
-    {question}
-    '''
+        Pregunta del usuario:
+        {question}
+    """
     prompt_template = PromptTemplate.from_template(TEMPLATE)
 
     chat = ChatGoogleGenerativeAI(
                     model="gemini-2.5-flash",
-                    temperature=0.1,
+                    temperature=0.3,
                     max_tokens = 500
             )
 
