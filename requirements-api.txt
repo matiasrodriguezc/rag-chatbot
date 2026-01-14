@@ -1,19 +1,14 @@
-# Archivo: requirements-api.txt (CORREGIDO)
 fastapi
 uvicorn[standard]
 python-dotenv
 requests
-
-# Nuevas librerías de LangChain (correctas)
+# Nuevas librerías de LangChain 
 langchain-google-genai
 langchain-huggingface
 langchain-text-splitters
 langchain-pinecone
-
 # Pinecone
 pinecone-client
-
 # Dependencia para embeddings locales
 sentence-transformers
-
 huggingface_hub

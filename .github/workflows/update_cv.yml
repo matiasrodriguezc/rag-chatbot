@@ -29,6 +29,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+          GOOGLE_DOC_ID: ${{ secrets.GOOGLE_DOC_ID }}
         run: |
           cd dags/pipeline
           python run_etl.py

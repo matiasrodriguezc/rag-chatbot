@@ -5,7 +5,6 @@ Este script se ejecuta desde GitHub Actions.
 import sys
 import os
 
-# Asegurar que el directorio del script esté en el path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cv_etl import (
@@ -23,7 +22,7 @@ def main():
         print("Iniciando pipeline de actualización de CV")
         print("=" * 50)
         
-        # Paso 1: Descargar CV desde GitHub
+        # Paso 1: Descargar CV desde Google Docs
         descargar_cv_de_google_docs()
         
         # Paso 2: Extraer y dividir texto

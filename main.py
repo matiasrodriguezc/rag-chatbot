@@ -28,7 +28,6 @@ if not PINECONE_API_KEY:
 app = FastAPI(title="Chatbot de CV")
 
 # --- CONFIGURACIÓN DE CORS ---
-# Esto es VITAL para que tu portafolio pueda llamar a la API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -48,7 +47,7 @@ class Pregunta(BaseModel):
 # --- Lógica de Carga ---
 def get_embedding_model():
     """Usa la API de Inferencia de Hugging Face (Clase y Parámetros Correctos)."""
-    # Usamos la clase que nos recomendó la advertencia
+    
     from langchain_huggingface import HuggingFaceEndpointEmbeddings
     
     hf_token = os.environ.get("HF_TOKEN")
@@ -75,18 +74,17 @@ def get_rag_chain():
     
     retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k':5, 'lambda_mult':0.7})
     TEMPLATE = """
-        Eres el asistente de IA personal de Matías Rodríguez. Tu trabajo es contar su experiencia profesional y académica basándote EXCLUSIVAMENTE en el contexto proporcionado.
+        Eres el asistente de IA personal de Matías Rodríguez.
         
-        Reglas de Comportamiento:
-        1. **IDIOMA (CRÍTICO):** Responde SIEMPRE en el mismo idioma en el que el usuario te pregunta. 
-        - Si el usuario pregunta en Inglés -> Responde en Inglés.
-        - Si el usuario pregunta en Español -> Responde en Español.
+        Tu objetivo: Responder a la pregunta del usuario de forma **HUMANA, NATURAL y DIRECTA**.
         
-        2. **Estilo Humano:** - NO uses listas con viñetas (*), ni guiones, ni formato de tabla.
-        - Redacta respuestas fluidas en párrafos, como si estuvieras conversando.
-        - Evita frases robóticas como "Según el documento...". Simplemente cuenta la información.
+        Reglas de Estilo:
+        1. **Concisión:** No cuentes la historia de su vida si no te la piden. Ve al grano.
+        2. **Longitud:** Tus respuestas deben tener idealmente entre **2 y 4 oraciones**. Máximo 1 párrafo breve.
+        3. **Formato:** NO uses listas, ni bullets (*), ni introducciones robóticas como "La información indica que...". Habla como una persona normal.
+        4. **Idioma:** Responde SIEMPRE en el mismo idioma que el usuario (Español o Inglés).
         
-        3. **Honestidad:** Si la respuesta no está en el contexto, di amablemente que no conoces ese detalle sobre Matías (en el idioma correspondiente).
+        Si la respuesta no está en el contexto, dilo brevemente.
 
         Contexto sobre Matías:
         {context}
@@ -98,8 +96,8 @@ def get_rag_chain():
 
     chat = ChatGoogleGenerativeAI(
                     model="gemini-2.5-flash",
-                    temperature=0.3,
-                    max_tokens = 1500
+                    temperature=0.2,
+                    max_tokens = 800
             )
 
     chain = ({'context': retriever, 

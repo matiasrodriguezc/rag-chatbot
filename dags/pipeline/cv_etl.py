@@ -5,8 +5,11 @@ from dotenv import load_dotenv
 load_dotenv() 
 
 # --- CONFIGURACIÓN GOOGLE DOCS ---
-DOC_ID = "1C1k0zGNiE_OqICy2PAaHsAV9zCJWY0IHn2FmfovPM28"
-CV_RAW_URL = f"https://docs.google.com/document/d/{DOC_ID}/export?format=txt"
+GOOGLE_DOC_ID = os.environ.get("GOOGLE_DOC_ID")
+if not GOOGLE_DOC_ID:
+    raise ValueError("GOOGLE_DOC_ID no encontrada en variables de entorno")
+
+CV_RAW_URL = f"https://docs.google.com/document/d/{GOOGLE_DOC_ID}/export?format=txt"
 
 CV_FILENAME = "matias_background.txt"
 LOCAL_CV_PATH = "./matias_background.txt"
