@@ -1,4 +1,4 @@
-# Dockerfile.api - Para deploy en Vercel/Railway/etc
+# Dockerfile.api - Para deploy en Koyeb (100% GRATIS, sin tarjeta de crédito)
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copiamos el código
 COPY main.py /app/
 
-# Puerto dinámico (Railway usa $PORT, Vercel usa 8000)
+# Koyeb usa el puerto 8000 por defecto
 ENV PORT=8000
-EXPOSE $PORT
+EXPOSE 8000
 
-# Comando de arranque (usa PORT si está disponible)
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Comando de arranque
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
