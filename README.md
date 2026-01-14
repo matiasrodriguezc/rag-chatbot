@@ -1,142 +1,131 @@
-# RAG Chatbot para CV Personal
+# 🤖 AI Portfolio Chatbot with Automated RAG Pipeline
 
-Este proyecto es un chatbot de IA conversacional diseñado para responder preguntas sobre la experiencia profesional y académica de una persona, basándose en la información de su currículum. Utiliza un enfoque de Generación Aumentada por Recuperación (RAG) para proporcionar respuestas precisas y contextualmente relevantes en un formato de conversación natural.
+![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangChain-Integration-green?logo=chainlink&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-El chatbot está construido con FastAPI y LangChain, y está diseñado para ser desplegado como una API que puede ser integrada en cualquier sitio web, como un portafolio personal.
+This project is a **Conversational AI Assistant** designed to answer questions about my professional experience, skills, and projects based on a living knowledge base.
 
-## ✨ Características
+Unlike traditional RAG chatbots that read static PDFs, this system implements a **CI/CD Pipeline** that automatically synchronizes a Vector Database (Pinecone) with a **Google Doc** in real-time. This allows the portfolio to remain constantly up-to-date without redeploying code.
 
-- **Generación Aumentada por Recuperación (RAG):** El chatbot utiliza un pipeline RAG para asegurar que las respuestas se basen exclusivamente en la información del CV proporcionado, minimizando la posibilidad de alucinaciones o información incorrecta.
-- **API basada en FastAPI:** La lógica del chatbot está expuesta a través de una API de FastAPI, lo que permite una fácil integración con aplicaciones web y otros sistemas.
-- **Streaming de Respuestas:** Las respuestas del chatbot se transmiten en tiempo real, palabra por palabra, para una experiencia de usuario más dinámica y atractiva.
-- **Soporte Multilingüe (Español/Inglés):** El chatbot está diseñado para responder en el mismo idioma en el que se le pregunta (español o inglés).
-- **Pipeline de ETL Automatizado:** Incluye un pipeline de ETL (Extract, Transform, Load) para procesar el CV desde un Google Doc, crear los embeddings y cargarlos en una base de datos vectorial.
-- **Despliegue con Docker:** El proyecto está completamente containerizado con Docker, lo que facilita su despliegue en cualquier plataforma que soporte contenedores.
+## ✨ Key Features
 
-## 🚀 Stack Tecnológico
+- **🧠 RAG (Retrieval-Augmented Generation):** Generates accurate answers by retrieving context solely from my curated bio, minimizing hallucinations.
+- **🔄 "Live Resume" Architecture:** The knowledge base is not hardcoded. A GitHub Actions workflow automatically fetches the latest data from Google Docs, processes it, and updates Pinecone.
+- **⚡ Streaming Responses:** Provides a fluid user experience by streaming the LLM response token-by-token (Server-Sent Events), similar to ChatGPT.
+- **🌐 Multilingual Support:** Automatically detects the user's language and responds fluently in either English or Spanish.
+- **🐳 Dockerized:** Fully containerized application ready for deployment on serverless platforms like Koyeb, Render, or AWS ECS.
 
-- **Backend:** FastAPI, Python 3.11
-- **Framework de IA:** LangChain
-- **Modelos de Lenguaje (LLM):** Google Gemini (gemini-2.5-flash)
-- **Modelos de Embeddings:** Hugging Face Sentence Transformers (all-MiniLM-L6-v2) a través de Inference Endpoints.
-- **Base de Datos Vectorial:** Pinecone
-- **Orquestación de ETL:** El pipeline de ETL está diseñado para ser ejecutado con Apache Airflow, aunque puede ser ejecutado manualmente.
-- **Despliegue:** Docker, Uvicorn
+## 🚀 Tech Stack
 
-## ⚙️ ¿Cómo Funciona? (Arquitectura RAG)
+| Component | Technology | Description |
+| :--- | :--- | :--- |
+| **Backend** | `FastAPI` | High-performance async API framework. |
+| **AI Orchestration** | `LangChain` | RAG chain management and prompt engineering. |
+| **LLM** | `Google Gemini 2.5 Flash` | Fast and efficient generative model. |
+| **Vector DB** | `Pinecone` | Semantic search and vector storage. |
+| **Embeddings** | `Hugging Face` | `all-MiniLM-L6-v2` model via Inference Endpoints. |
+| **ETL Pipeline** | `GitHub Actions` + `Python` | Automated extraction from Google Docs to Pinecone. |
+| **Infrastructure** | `Docker` | Lightweight containerization. |
 
-El chatbot sigue una arquitectura de Generación Aumentada por Recuperación (RAG) para generar sus respuestas:
+## ⚙️ System Architecture
 
-1.  **Pipeline de ETL (Offline):**
-    *   **Extracción:** El contenido del CV se descarga desde un Google Doc.
-    *   **Transformación:** El texto se divide en fragmentos más pequeños (chunks).
-    *   **Carga:** Cada chunk se convierte en un vector numérico (embedding) y se almacena en un índice de Pinecone. Este proceso se realiza una sola vez o cada vez que el CV se actualiza.
+1.  **Data Ingestion (ETL):** A Python script (`cv_etl.py`) downloads the latest biography from a specific Google Doc ID, splits the text into semantic chunks, and generates embeddings.
+2.  **Storage:** The vectors are stored in **Pinecone**, tagged with metadata.
+3.  **Inference (Online):**
+    * User sends a question via the API.
+    * The system converts the question into a vector.
+    * It retrieves the most relevant text chunks from Pinecone.
+    * A custom Prompt is built with this context.
+    * **Gemini** generates the final response in a natural, conversational style.
 
-2.  **Inferencia en Tiempo Real (Online):**
-    *   **Pregunta del Usuario:** El usuario envía una pregunta a la API.
-    *   **Creación de Embedding:** La pregunta del usuario también se convierte en un embedding.
-    *   **Búsqueda de Similitud:** El sistema busca en Pinecone los chunks de texto del CV cuyos embeddings son más similares al embedding de la pregunta.
-    *   **Generación de Respuesta:** Los chunks recuperados (el contexto) y la pregunta original se envían al LLM (Google Gemini) a través de un prompt cuidadosamente diseñado. El LLM genera una respuesta en lenguaje natural basada únicamente en el contexto proporcionado.
+## 🏁 Local Installation & Usage
 
-## 🏁 Instalación y Uso Local
+### Prerequisites
+* Python 3.11+
+* Docker (Optional)
+* API Keys: Pinecone, Hugging Face Token, Google Gemini API Key.
 
-### Prerrequisitos
-
-- Python 3.11
-- Docker
-- Una cuenta de Pinecone y una clave de API.
-- Una cuenta de Hugging Face y un token de acceso.
-
-### 1. Clonar el Repositorio
-
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/tu-usuario/rag-chatbot.git
+git clone [https://github.com/your-username/rag-chatbot.git](https://github.com/your-username/rag-chatbot.git)
 cd rag-chatbot
-```
-
-### 2. Configurar las Variables de Entorno
-
-Crea un archivo `.env` en la raíz del proyecto y añade las siguientes variables:
 
 ```
-PINECONE_API_KEY="TU_API_KEY_DE_PINECONE"
-PINECONE_INDEX_NAME="cv-matias" # O el nombre de tu índice
-HF_TOKEN="TU_TOKEN_DE_HUGGING_FACE"
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the root directory:
+
+```ini
+PINECONE_API_KEY="your_pinecone_key"
+PINECONE_INDEX_NAME="cv-matias"
+HF_TOKEN="your_huggingface_token"
+GOOGLE_API_KEY="your_google_gemini_key"
+GOOGLE_DOC_ID="your_google_doc_id" # Only needed for running ETL locally
+
 ```
 
-### 3. Ejecutar el Pipeline de ETL
+### 3. Load the Knowledge Base (ETL)
 
-Este paso es necesario para poblar la base de datos de Pinecone con la información de tu CV.
-
-Primero, instala las dependencias del pipeline:
+Before chatting, you need to populate the database:
 
 ```bash
+# Install ETL dependencies
 pip install -r requirements.txt
-```
 
-Luego, ejecuta el script del pipeline:
-
-```bash
+# Run the pipeline script
 python dags/pipeline/run_etl.py
+
 ```
 
-### 4. Ejecutar la API Localmente
-
-Instala las dependencias de la API:
+### 4. Run the API Server
 
 ```bash
+# Install API dependencies
 pip install -r requirements-api.txt
-```
 
-Inicia el servidor de FastAPI:
-
-```bash
+# Start server with Hot-Reload
 uvicorn main:app --reload
+
 ```
 
-La API estará disponible en `http://localhost:8000`.
+The API will be available at `http://localhost:8000/docs`.
 
-## 🐳 Despliegue con Docker
+## 🐳 Docker Deployment
 
-El proyecto incluye un `Dockerfile` para construir una imagen de contenedor para la API.
-
-### 1. Construir la Imagen de Docker
+The project includes an optimized `Dockerfile` for production.
 
 ```bash
+# Build the image
 docker build -t rag-chatbot-api .
-```
 
-### 2. Ejecutar el Contenedor
-
-```bash
-docker run -d -p 8000:8000 \
-  --env-file .env \
-  rag-chatbot-api
-```
-
-El contenedor expondrá la API en el puerto 8000 de tu máquina local.
-
-## 📂 Estructura del Proyecto
+# Run the container
+docker run -d -p 8000:8000 --env-file .env rag-chatbot-api
 
 ```
+
+## 📂 Project Structure
+
+```text
 .
-├── .github/workflows/   # Workflows de GitHub Actions
-├── dags/                # Directorio para pipelines de Airflow
-│   └── pipeline/
-│       ├── cv_etl.py    # Lógica principal del pipeline de ETL
-│       └── run_etl.py   # Script para ejecutar el pipeline manualmente
-├── .gitignore
-├── Dockerfile           # Define la imagen de Docker para la API
-├── main.py              # Lógica principal de la API de FastAPI
-├── README.md            # Este archivo
-├── requirements-api.txt # Dependencias de Python para la API
-└── requirements.txt     # Dependencias de Python para el pipeline de ETL
+├── .github/workflows/   # CI/CD: Automated Pipeline (Google Docs -> Pinecone)
+├── dags/pipeline/       # ETL Scripts
+│   ├── cv_etl.py        # Core logic for processing Google Docs
+│   └── run_etl.py       # Execution entry point
+├── main.py              # FastAPI Application & RAG Logic
+├── Dockerfile           # Optimized container configuration
+├── requirements.txt     # Dependencies for ETL Pipeline
+└── requirements-api.txt # Dependencies for API (Production)
+
 ```
 
-## 🤝 Contribuciones
+## 🤝 Contributing
 
-Las contribuciones son bienvenidas. Por favor, abre un issue o un pull request para discutir los cambios que te gustaría hacer.
+Contributions are welcome! This project serves as a demonstration of software engineering applied to AI. Feel free to open issues or submit PRs.
 
-## 📄 Licencia
+## 📄 License
 
-Este proyecto está bajo la Licencia MIT.
+This project is licensed under the MIT License.
