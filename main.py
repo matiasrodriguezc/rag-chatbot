@@ -99,7 +99,7 @@ def get_rag_chain():
     chat = ChatGoogleGenerativeAI(
                     model="gemini-2.5-flash",
                     temperature=0.3,
-                    max_tokens = 500
+                    max_tokens = 1500
             )
 
     chain = ({'context': retriever, 
