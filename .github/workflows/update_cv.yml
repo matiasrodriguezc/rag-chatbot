@@ -1,10 +1,7 @@
 name: Actualizar CV en Vector DB
 
 on:
-  schedule:
-    # Ejecuta todos los días a las 03:00 UTC (medianoche en Argentina)
-    - cron: "0 3 * * *"
-  workflow_dispatch:  # Permite ejecutarlo manualmente desde GitHub
+  workflow_dispatch:  # Único trigger: permite ejecutarlo manualmente desde GitHub
 
 jobs:
   update-cv:
