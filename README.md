@@ -12,7 +12,9 @@ Unlike traditional RAG chatbots that read static PDFs, this system implements a 
 
 ## ✨ Key Features
 
-- **🧠 RAG (Retrieval-Augmented Generation):** Generates accurate answers by retrieving context solely from my curated bio, minimizing hallucinations.
+- **🧠 Advanced RAG Architecture:** 
+    - **LongRAG:** Leverages massive context windows (2000+ tokens per chunk) to retrieve larger, more coherent text blocks, preventing context loss common in traditional chunking.
+    - **Self-RAG (Self-Reflective Loop):** The AI autonomously evaluates its own retrieved context and drafts, ensuring answers are fully supported by the data and eliminating hallucinations before returning the final response.
 - **🔄 "Live Resume" Architecture:** The knowledge base is not hardcoded. A GitHub Actions workflow automatically fetches the latest data from Google Docs, processes it, and updates Pinecone.
 - **⚡ Streaming Responses:** Provides a fluid user experience by streaming the LLM response token-by-token (Server-Sent Events), similar to ChatGPT.
 - **🌐 Multilingual Support:** Automatically detects the user's language and responds fluently in either English or Spanish.
@@ -34,12 +36,12 @@ Unlike traditional RAG chatbots that read static PDFs, this system implements a 
 
 1.  **Data Ingestion (ETL):** A Python script (`cv_etl.py`) downloads the latest biography from a specific Google Doc ID, splits the text into semantic chunks, and generates embeddings.
 2.  **Storage:** The vectors are stored in **Pinecone**, tagged with metadata.
-3.  **Inference (Online):**
+3.  **Inference (Online) incorporating Self-RAG:**
     * User sends a question via the API.
-    * The system converts the question into a vector.
-    * It retrieves the most relevant text chunks from Pinecone.
-    * A custom Prompt is built with this context.
-    * **Gemini** generates the final response in a natural, conversational style.
+    * The system retrieves the most relevant **large text chunks** (LongRAG) from Pinecone.
+    * **Drafting:** A custom prompt is built, and Gemini generates an initial draft.
+    * **Self-Reflection:** A secondary refinement prompt forces the LLM to act as an editor—verifying the draft's completeness, grammatical flow, and factual accuracy against the retrieved context.
+    * **Delivery:** The final, polished response is streamed back to the user seamlessly.
 
 ## 🏁 Local Installation & Usage
 
