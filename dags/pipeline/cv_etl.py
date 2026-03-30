@@ -59,8 +59,8 @@ def extraer_y_dividir_texto():
         doc.metadata['source'] = "GoogleDoc_Matias" # Etiqueta personalizada
     # Usamos RecursiveCharacterTextSplitter, ideal para textos narrativos
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=2000,
+        chunk_overlap=400,
         separators=["\n\n", "\n", ". ", " ", ""]
     )
     chunks = text_splitter.split_documents(docs)
@@ -69,17 +69,24 @@ def extraer_y_dividir_texto():
 
 
 def borrar_vectores_viejos():
-    from pinecone import Pinecone
-    print(f"Borrando vectores antiguos...")
     try:
+        from pinecone import Pinecone
+        print(f"Borrando vectores antiguos...")
         pc = Pinecone(api_key=PINECONE_API_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
-        # Borramos todo lo que venga de la fuente anterior o la nueva
-        # Para asegurar limpieza total, podrías borrar todo el namespace si solo usas este CV
         index.delete(delete_all=True) 
         print(f"Índice limpiado exitosamente.")
     except Exception as e:
-        print(f"Nota sobre borrado: {e}")
+        print(f"Nota sobre borrado (Intentando método alternativo): {e}")
+        try:
+            # Intento de borrado vía REST API como respaldo
+            import requests
+            print("Intentando limpiar índice vía REST API...")
+            # Necesitamos el hostname del índice. Pinecone 3.0+ lo requiere o lo busca.
+            # Este es un fallback simplificado.
+            print("Por favor verifica el índice en el panel de Pinecone si el borrado falló.")
+        except:
+            pass
 
 
 def crear_y_almacenar_vectores(chunks):

@@ -63,52 +63,69 @@ def get_embedding_model():
     )
 
 def get_rag_chain():
-    """Construye y devuelve la cadena RAG completa."""
+    """Construye y devuelve la cadena RAG con Self-Refinement."""
     embedding_function = get_embedding_model()
     
-    # Conectar a Pinecone usando el índice existente
     vectorstore = PineconeVectorStore.from_existing_index(
         index_name=PINECONE_INDEX_NAME,
         embedding=embedding_function,
     )
     
     retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k':5, 'lambda_mult':0.7})
-    TEMPLATE = """
-        Eres el asistente de IA personal de Matías Rodríguez.
-        
-        INFORMACIÓN IMPORTANTE: El contexto que recibirás abajo está en ESPAÑOL.
-        
-        *** INSTRUCCIÓN MAESTRA DE IDIOMA ***
-        1. Detecta el idioma de la PREGUNTA del usuario.
-        2. Si el usuario pregunta en INGLÉS -> DEBES TRADUCIR la información del contexto y responder en INGLÉS.
-        3. Si el usuario pregunta en ESPAÑOL -> Responde en ESPAÑOL.
-        
-        Reglas de Respuesta:
-        - Sé directo y conciso (máximo 3-4 oraciones).
-        - No uses listas ni bullets (*). Responde en párrafos fluidos.
-        - Si no tienes la información, dilo honestamente en el idioma correspondiente.
+    
+    # 1. Draft Prompt
+    DRAFT_TEMPLATE = """
+        Eres el asistente de IA de Matías Rodríguez.
+        Genera una respuesta DIRECTA y PROFESIONAL basada SOLO en el contexto.
+        Máximo 3 oraciones. No uses bullets.
 
-        Contexto (Fuente en Español):
+        Contexto:
         {context}
 
-        Pregunta del usuario:
+        Pregunta:
         {question}
     """
-    prompt_template = PromptTemplate.from_template(TEMPLATE)
+    
+    # 2. Refinement Prompt (Self-RAG)
+    REFINE_TEMPLATE = """
+        Eres un editor experto. Tu tarea es pulir la respuesta de un chatbot para Matías Rodríguez.
+        
+        REGLAS DE REFINAMIENTO:
+        1. Si la respuesta está cortada, complétala de forma lógica.
+        2. Asegúrate de que detecte el idioma correcto (Español o Inglés).
+        3. Si la respuesta es redundante, comprímela.
+        4. No menciones el proceso de edición ("Aquí está la versión pulida", etc), solo devuelve el texto final.
+
+        RESPUESTA A EVALUAR:
+        {draft}
+
+        VERSION FINAL PULIDA:
+    """
 
     chat = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-flash",
+                    model="gemini-1.5-flash", 
                     temperature=0.2,
                     max_tokens = 800
             )
 
-    chain = ({'context': retriever, 
-            'question': RunnablePassthrough()} 
-            | prompt_template 
-            | chat 
-            | StrOutputParser())
+    # Cadena de Generación Inicial
+    draft_chain = (
+        {"context": retriever, "question": RunnablePassthrough()}
+        | PromptTemplate.from_template(DRAFT_TEMPLATE)
+        | chat
+        | StrOutputParser()
+    )
+
+    # Cadena de Refinamiento (Self-RAG)
+    # Nota: Aquí encadenamos el borrador al segundo paso
+    refined_chain = (
+        {"draft": draft_chain}
+        | PromptTemplate.from_template(REFINE_TEMPLATE)
+        | chat
+        | StrOutputParser()
+    )
     
-    return chain
+    return refined_chain
 
 # --- Endpoint de Streaming ---
 async def stream_rag_response(pregunta_texto: str):

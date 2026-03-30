@@ -6,6 +6,6 @@ python-dotenv
 langchain-text-splitters
 langchain-huggingface
 langchain-pinecone
-pinecone-client
+pinecone
 sentence-transformers
 huggingface_hub
