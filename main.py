@@ -1,7 +1,8 @@
 import asyncio
+from contextlib import asynccontextmanager
+from functools import lru_cache
 from fastapi import FastAPI
 from pydantic import BaseModel
-import sys
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,43 +26,22 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
 
-app = FastAPI(title="Chatbot de CV")
-
-# --- CONFIGURACIÓN DE CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "https://matiasrodriguezc.github.io"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # --- Modelos Pydantic ---
 class Pregunta(BaseModel):
     texto: str
 
 # --- Lógica de Carga ---
+@lru_cache(maxsize=1)
 def get_embedding_model():
-    """Usa la API de Inferencia de Hugging Face (Clase y Parámetros Correctos)."""
-    
-    from langchain_huggingface import HuggingFaceEndpointEmbeddings
-    
-    hf_token = os.environ.get("HF_TOKEN")
-    if not hf_token:
-        from dotenv import load_dotenv
-        load_dotenv()
-        hf_token = os.environ.get("HF_TOKEN")
-        if not hf_token:
-            raise ValueError("HF_TOKEN no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
-    return HuggingFaceEndpointEmbeddings(
-        huggingfacehub_api_token=hf_token,  
-        model=EMBEDDING_MODEL_NAME
+    """Embeddings locales (mismo modelo que Pinecone). Evita la Inference API de Hugging Face."""
+    local_only = os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true")
+    return HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": "cpu", "local_files_only": local_only},
+        encode_kwargs={"normalize_embeddings": False},
     )
 
+@lru_cache(maxsize=1)
 def get_rag_chain():
     """Construye y devuelve la cadena RAG con Self-Refinement."""
     embedding_function = get_embedding_model()
@@ -126,6 +106,26 @@ def get_rag_chain():
     )
     
     return refined_chain
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_rag_chain()
+    yield
+
+app = FastAPI(title="Chatbot de CV", lifespan=lifespan)
+
+# --- CONFIGURACIÓN DE CORS ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://matiasrodriguezc.github.io"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Endpoint de Streaming ---
 async def stream_rag_response(pregunta_texto: str):

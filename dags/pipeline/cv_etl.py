@@ -23,13 +23,12 @@ if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada en las variables de entorno")
 
 def get_embedding_model():
-    from langchain_huggingface import HuggingFaceEndpointEmbeddings
-    hf_token = os.environ.get("HF_TOKEN")
-    if not hf_token:
-        raise ValueError("HF_TOKEN no encontrada")
-    return HuggingFaceEndpointEmbeddings(
-        huggingfacehub_api_token=hf_token,  
-        model=EMBEDDING_MODEL_NAME          
+    from langchain_huggingface import HuggingFaceEmbeddings
+    local_only = os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true")
+    return HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": "cpu", "local_files_only": local_only},
+        encode_kwargs={"normalize_embeddings": False},
     )
 
 def descargar_cv_de_google_docs():

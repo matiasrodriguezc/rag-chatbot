@@ -16,6 +16,11 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 
 RUN pip install -r /app/requirements.txt
 
+# Cache MiniLM in the image so Koyeb never calls Hugging Face Inference or Hub at runtime.
+ENV HF_HOME=/app/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+ENV HF_HUB_OFFLINE=1
+
 COPY . /app/
 
 ENV PORT=8000
