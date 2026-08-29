@@ -52,13 +52,23 @@ def get_embedding_model():
         encode_kwargs={"normalize_embeddings": False},
     )
 
+def _pinecone_host() -> str:
+    raw = (PINECONE_INDEX_HOST or "").strip().strip('"').strip("'")
+    raw = raw.replace("https://", "").replace("http://", "").rstrip("/")
+    if not raw:
+        raise ValueError(
+            "PINECONE_INDEX_HOST no está definida. "
+            "Koyeb no puede usar el control plane de Pinecone (403 en /indexes). "
+            "En la consola de Pinecone, abrí el índice cv-matias, copiá Host "
+            "(algo como cv-matias-xxxx.svc.xxx.pinecone.io) y agregala en Koyeb como PINECONE_INDEX_HOST."
+        )
+    return raw
+
 @lru_cache(maxsize=1)
 def get_pinecone_index():
-    """Conecta al índice sin list_indexes() (ese endpoint da 403 desde Koyeb)."""
+    """Conecta al data plane por host. Evita describe/list_indexes (403 desde Koyeb)."""
     pc = Pinecone(api_key=PINECONE_API_KEY)
-    if PINECONE_INDEX_HOST:
-        return pc.Index(host=PINECONE_INDEX_HOST)
-    return pc.Index(PINECONE_INDEX_NAME)
+    return pc.Index(host=_pinecone_host())
 
 @lru_cache(maxsize=4)
 def get_rag_chain(model_name: str):
