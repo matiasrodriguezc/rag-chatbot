@@ -22,6 +22,7 @@ EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # Configuración de Pinecone
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
@@ -83,9 +84,9 @@ def get_rag_chain():
     """
 
     chat = ChatGoogleGenerativeAI(
-                    model="gemini-1.5-flash", 
+                    model=GEMINI_MODEL,
                     temperature=0.2,
-                    max_tokens = 800
+                    max_tokens=800,
             )
 
     # Cadena de Generación Inicial
