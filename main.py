@@ -12,10 +12,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from fastapi.middleware.cors import CORSMiddleware
 from pinecone import Pinecone
+from operator import itemgetter
+import re
 
 # --- CONFIGURACIÓN ---
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -36,6 +37,50 @@ GEMINI_MODELS = [
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
+
+_EN_HINTS = {
+    "hi", "hello", "hey", "how", "what", "who", "where", "when", "why", "which",
+    "tell", "about", "experience", "experiences", "skill", "skills", "project",
+    "projects", "background", "resume", "work", "job", "please", "thanks",
+    "thank", "your", "you", "the", "is", "are", "his", "he", "can", "does",
+    "did", "was", "were", "with", "from", "this", "that", "have", "has",
+}
+_ES_HINTS = {
+    "hola", "buenas", "buen", "qué", "que", "quién", "quien", "cómo", "como",
+    "dónde", "donde", "cuándo", "cuando", "cuál", "cual", "experiencia",
+    "habilidades", "proyectos", "trabajo", "gracias", "decime", "conta",
+    "contame", "sobre", "del", "una", "unos", "unas", "los", "las", "por",
+    "para", "su", "sus", "el", "la", "de", "en", "es", "con",
+}
+
+def detect_language(text: str) -> str:
+    """Devuelve 'en' o 'es' según la pregunta del usuario."""
+    raw = (text or "").strip().lower()
+    if not raw:
+        return "es"
+    compact = re.sub(r"[^a-záéíóúüñ\s]", " ", raw)
+    if compact.strip() in {"hi", "hey", "hello", "yo", "sup", "hiya"}:
+        return "en"
+    if compact.strip() in {"hola", "holis", "buenas", "buen dia", "buen día"}:
+        return "es"
+    if re.search(r"[áéíóúüñ¿¡]", raw):
+        return "es"
+    words = [w for w in compact.split() if w]
+    en_score = sum(1 for w in words if w in _EN_HINTS)
+    es_score = sum(1 for w in words if w in _ES_HINTS)
+    if en_score > es_score:
+        return "en"
+    if es_score > en_score:
+        return "es"
+    return "en" if re.fullmatch(r"[a-z\s']+", compact.strip()) else "es"
+
+def language_name(code: str) -> str:
+    return "English" if code == "en" else "Spanish"
+
+def user_error_message(lang_code: str) -> str:
+    if lang_code == "en":
+        return "Sorry, something went wrong while answering. Please try again in a few seconds."
+    return "Lo siento, ocurrió un error al procesar la respuesta. Probá de nuevo en unos segundos."
 
 # --- Modelos Pydantic ---
 class Pregunta(BaseModel):
@@ -81,30 +126,40 @@ def get_rag_chain(model_name: str):
     retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 5, "lambda_mult": 0.7})
 
     DRAFT_TEMPLATE = """
-        Eres el asistente de IA de Matías Rodríguez.
-        Genera una respuesta DIRECTA y PROFESIONAL basada SOLO en el contexto.
-        Máximo 3 oraciones. No uses bullets.
+        You are Matías Rodríguez's AI assistant.
+        Answer using ONLY the context. Be direct and professional.
+        Maximum 3 sentences. No bullets.
 
-        Contexto:
+        LANGUAGE (mandatory):
+        - The user wrote in {language}.
+        - Write the ENTIRE answer in {language}. Do not mix languages.
+        - If {language} is English, use no Spanish.
+        - If {language} is Spanish, use no English.
+
+        Context:
         {context}
 
-        Pregunta:
+        Question:
         {question}
     """
 
     REFINE_TEMPLATE = """
-        Eres un editor experto. Tu tarea es pulir la respuesta de un chatbot para Matías Rodríguez.
+        You are an editor for Matías Rodríguez's chatbot.
 
-        REGLAS DE REFINAMIENTO:
-        1. Si la respuesta está cortada, complétala de forma lógica.
-        2. Asegúrate de que detecte el idioma correcto (Español o Inglés).
-        3. Si la respuesta es redundante, comprímela.
-        4. No menciones el proceso de edición ("Aquí está la versión pulida", etc), solo devuelve el texto final.
+        RULES:
+        1. If the draft is cut off, complete it.
+        2. The user's question is in {language}. The final answer MUST be 100% in {language}.
+           If the draft is in the wrong language, translate it.
+        3. If the draft is redundant, compress it.
+        4. Do not mention editing. Return only the final text.
 
-        RESPUESTA A EVALUAR:
+        QUESTION:
+        {question}
+
+        DRAFT:
         {draft}
 
-        VERSION FINAL PULIDA:
+        FINAL ANSWER:
     """
 
     chat = ChatGoogleGenerativeAI(
@@ -115,14 +170,22 @@ def get_rag_chain(model_name: str):
     )
 
     draft_chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
+        {
+            "context": itemgetter("question") | retriever,
+            "question": itemgetter("question"),
+            "language": itemgetter("language"),
+        }
         | PromptTemplate.from_template(DRAFT_TEMPLATE)
         | chat
         | StrOutputParser()
     )
 
     refined_chain = (
-        {"draft": draft_chain}
+        {
+            "draft": draft_chain,
+            "question": itemgetter("question"),
+            "language": itemgetter("language"),
+        }
         | PromptTemplate.from_template(REFINE_TEMPLATE)
         | chat
         | StrOutputParser()
@@ -151,17 +214,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def generate_answer(pregunta_texto: str) -> str:
+async def generate_answer(pregunta_texto: str, lang_code: str) -> str:
+    payload = {
+        "question": pregunta_texto,
+        "language": language_name(lang_code),
+    }
     last_error = None
+    empty_fallback = (
+        "I couldn't generate an answer. Please try again in a few seconds."
+        if lang_code == "en"
+        else "No pude generar una respuesta. Intentá de nuevo en unos segundos."
+    )
     for model_name in GEMINI_MODELS:
         try:
-            print(f"Intentando modelo: {model_name}")
+            print(f"Intentando modelo: {model_name} (idioma={payload['language']})")
             refined_chain, draft_chain = get_rag_chain(model_name)
             try:
-                text = await refined_chain.ainvoke(pregunta_texto)
+                text = await refined_chain.ainvoke(payload)
             except Exception as refine_error:
                 print(f"Refine falló ({model_name}): {refine_error}. Uso el borrador.")
-                text = await draft_chain.ainvoke(pregunta_texto)
+                text = await draft_chain.ainvoke(payload)
             if text and str(text).strip():
                 return str(text).strip()
             print(f"Modelo {model_name} devolvió una respuesta vacía")
@@ -170,23 +242,24 @@ async def generate_answer(pregunta_texto: str) -> str:
             print(f"Modelo {model_name} falló: {e}")
     if last_error:
         raise last_error
-    return "No pude generar una respuesta. Intentá de nuevo en unos segundos."
+    return empty_fallback
 
 async def stream_rag_response(pregunta_texto: str):
     """Genera la respuesta completa y la envía en chunks (evita el stream vacío de Gemini 3 + AFC)."""
+    lang_code = detect_language(pregunta_texto)
     try:
-        text = await generate_answer(pregunta_texto)
-        print(f"Respuesta ({len(text)} chars): {text[:200]}")
+        text = await generate_answer(pregunta_texto, lang_code)
+        print(f"Respuesta ({len(text)} chars, {lang_code}): {text[:200]}")
         for i in range(0, len(text), 16):
             yield text[i : i + 16]
             await asyncio.sleep(0.01)
     except Exception as e:
         print(f"Error durante el streaming: {e}")
-        yield "Lo siento, ocurrió un error al procesar la respuesta. Probá de nuevo en unos segundos."
+        yield user_error_message(lang_code)
 
 @app.post("/ask")
 async def ask_cv(pregunta: Pregunta):
-    print(f"Recibida pregunta (stream): {pregunta.texto}")
+    print(f"Recibida pregunta (stream): {pregunta.texto} [lang={detect_language(pregunta.texto)}]")
     return StreamingResponse(
         stream_rag_response(pregunta.texto),
         media_type="text/plain; charset=utf-8",
