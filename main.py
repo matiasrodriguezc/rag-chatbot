@@ -15,14 +15,24 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from fastapi.middleware.cors import CORSMiddleware
+from pinecone import Pinecone
 
 # --- CONFIGURACIÓN ---
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Configuración de Pinecone
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "cv-matias")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+PINECONE_INDEX_HOST = os.environ.get("PINECONE_INDEX_HOST") or os.environ.get("PINECONE_HOST")
+
+# flash-latest suele ir a Gemini 3.x (streaming vacío + 503). Probar alternativas.
+GEMINI_MODELS = [
+    m.strip()
+    for m in os.environ.get(
+        "GEMINI_MODEL",
+        "gemini-2.5-flash,gemini-flash-lite-latest,gemini-2.0-flash",
+    ).split(",")
+    if m.strip()
+]
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
@@ -43,18 +53,23 @@ def get_embedding_model():
     )
 
 @lru_cache(maxsize=1)
-def get_rag_chain():
+def get_pinecone_index():
+    """Conecta al índice sin list_indexes() (ese endpoint da 403 desde Koyeb)."""
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    if PINECONE_INDEX_HOST:
+        return pc.Index(host=PINECONE_INDEX_HOST)
+    return pc.Index(PINECONE_INDEX_NAME)
+
+@lru_cache(maxsize=4)
+def get_rag_chain(model_name: str):
     """Construye y devuelve la cadena RAG con Self-Refinement."""
     embedding_function = get_embedding_model()
-    
-    vectorstore = PineconeVectorStore.from_existing_index(
-        index_name=PINECONE_INDEX_NAME,
+    vectorstore = PineconeVectorStore(
+        index=get_pinecone_index(),
         embedding=embedding_function,
     )
-    
-    retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k':5, 'lambda_mult':0.7})
-    
-    # 1. Draft Prompt
+    retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 5, "lambda_mult": 0.7})
+
     DRAFT_TEMPLATE = """
         Eres el asistente de IA de Matías Rodríguez.
         Genera una respuesta DIRECTA y PROFESIONAL basada SOLO en el contexto.
@@ -66,11 +81,10 @@ def get_rag_chain():
         Pregunta:
         {question}
     """
-    
-    # 2. Refinement Prompt (Self-RAG)
+
     REFINE_TEMPLATE = """
         Eres un editor experto. Tu tarea es pulir la respuesta de un chatbot para Matías Rodríguez.
-        
+
         REGLAS DE REFINAMIENTO:
         1. Si la respuesta está cortada, complétala de forma lógica.
         2. Asegúrate de que detecte el idioma correcto (Español o Inglés).
@@ -84,12 +98,12 @@ def get_rag_chain():
     """
 
     chat = ChatGoogleGenerativeAI(
-                    model=GEMINI_MODEL,
-                    temperature=0.2,
-                    max_tokens=800,
-            )
+        model=model_name,
+        temperature=0.2,
+        max_tokens=800,
+        disable_streaming=True,
+    )
 
-    # Cadena de Generación Inicial
     draft_chain = (
         {"context": retriever, "question": RunnablePassthrough()}
         | PromptTemplate.from_template(DRAFT_TEMPLATE)
@@ -97,20 +111,19 @@ def get_rag_chain():
         | StrOutputParser()
     )
 
-    # Cadena de Refinamiento (Self-RAG)
-    # Nota: Aquí encadenamos el borrador al segundo paso
     refined_chain = (
         {"draft": draft_chain}
         | PromptTemplate.from_template(REFINE_TEMPLATE)
         | chat
         | StrOutputParser()
     )
-    
-    return refined_chain
+
+    return refined_chain, draft_chain
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_rag_chain()
+    # Solo MiniLM. Pinecone/Gemini se conectan en el primer /ask para no tumbar el health check.
+    get_embedding_model()
     yield
 
 app = FastAPI(title="Chatbot de CV", lifespan=lifespan)
@@ -128,30 +141,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Endpoint de Streaming ---
+async def generate_answer(pregunta_texto: str) -> str:
+    last_error = None
+    for model_name in GEMINI_MODELS:
+        try:
+            print(f"Intentando modelo: {model_name}")
+            refined_chain, draft_chain = get_rag_chain(model_name)
+            try:
+                text = await refined_chain.ainvoke(pregunta_texto)
+            except Exception as refine_error:
+                print(f"Refine falló ({model_name}): {refine_error}. Uso el borrador.")
+                text = await draft_chain.ainvoke(pregunta_texto)
+            if text and str(text).strip():
+                return str(text).strip()
+            print(f"Modelo {model_name} devolvió una respuesta vacía")
+        except Exception as e:
+            last_error = e
+            print(f"Modelo {model_name} falló: {e}")
+    if last_error:
+        raise last_error
+    return "No pude generar una respuesta. Intentá de nuevo en unos segundos."
+
 async def stream_rag_response(pregunta_texto: str):
-    """Generador asíncrono para la respuesta del chat."""
+    """Genera la respuesta completa y la envía en chunks (evita el stream vacío de Gemini 3 + AFC)."""
     try:
-        rag_chain = get_rag_chain()
-        # .astream() es la versión asíncrona de .stream()
-        # Esto devuelve los "chunks" (palabras/tokens) a medida que el LLM los genera
-        async for chunk in rag_chain.astream(pregunta_texto):
-            yield chunk
-            await asyncio.sleep(0.01) # Pequeña pausa para el "efecto" de streaming
+        text = await generate_answer(pregunta_texto)
+        print(f"Respuesta ({len(text)} chars): {text[:200]}")
+        for i in range(0, len(text), 16):
+            yield text[i : i + 16]
+            await asyncio.sleep(0.01)
     except Exception as e:
         print(f"Error durante el streaming: {e}")
-        yield "Lo siento, ocurrió un error al procesar la respuesta."
+        yield "Lo siento, ocurrió un error al procesar la respuesta. Probá de nuevo en unos segundos."
 
 @app.post("/ask")
 async def ask_cv(pregunta: Pregunta):
-    """
-    Recibe una pregunta y devuelve una respuesta en streaming.
-    """
     print(f"Recibida pregunta (stream): {pregunta.texto}")
-    # Devuelve un StreamingResponse que consume el generador
     return StreamingResponse(
-        stream_rag_response(pregunta.texto), 
-        media_type="text/event-stream"
+        stream_rag_response(pregunta.texto),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 @app.get("/")
