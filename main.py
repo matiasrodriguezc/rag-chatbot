@@ -207,7 +207,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://matiasrodriguezc.github.io"
+        "https://matiasrodriguezc.github.io",
+        "https://matiasrodriguezc.com.ar",
+        "https://www.matiasrodriguezc.com.ar"
     ],
     allow_credentials=True,
     allow_methods=["*"],
