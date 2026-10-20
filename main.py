@@ -132,6 +132,10 @@ def get_rag_chain(model_name: str):
         Answer using ONLY the context. Be direct and professional.
         Maximum 3 sentences. No bullets.
 
+        FACTS (mandatory):
+        - Copy every date, year, number and name exactly as written in the context.
+        - The context is up to date: a recent year is correct, never replace it with an earlier one.
+
         LANGUAGE (mandatory):
         - The user wrote in {language}.
         - Write the ENTIRE answer in {language}. Do not mix languages.
@@ -153,7 +157,9 @@ def get_rag_chain(model_name: str):
         2. The user's question is in {language}. The final answer MUST be 100% in {language}.
            If the draft is in the wrong language, translate it.
         3. If the draft is redundant, compress it.
-        4. Do not mention editing. Return only the final text.
+        4. Never change any date, year, number or name from the draft. They come from
+           an up-to-date source and are correct, even if they seem recent to you.
+        5. Do not mention editing. Return only the final text.
 
         QUESTION:
         {question}
@@ -169,6 +175,8 @@ def get_rag_chain(model_name: str):
         temperature=0.2,
         max_tokens=800,
         disable_streaming=True,
+        # Ante un 429 conviene pasar al siguiente modelo de GEMINI_MODELS en vez de reintentar ~2 min
+        max_retries=1,
     )
 
     draft_chain = (
