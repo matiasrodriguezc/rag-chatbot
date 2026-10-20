@@ -5,7 +5,7 @@ requests
 python-dotenv
 langchain-text-splitters
 langchain-huggingface
-langchain-pinecone
+langchain-pinecone>=0.2.8
 pinecone
 sentence-transformers
 huggingface_hub

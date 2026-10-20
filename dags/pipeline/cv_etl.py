@@ -1,6 +1,7 @@
 import os
 import requests
 import sys
+import uuid
 from dotenv import load_dotenv
 load_dotenv() 
 
@@ -67,39 +68,43 @@ def extraer_y_dividir_texto():
     return chunks
 
 
-def borrar_vectores_viejos():
-    try:
-        from pinecone import Pinecone
-        print(f"Borrando vectores antiguos...")
-        pc = Pinecone(api_key=PINECONE_API_KEY)
-        index = pc.Index(PINECONE_INDEX_NAME)
-        index.delete(delete_all=True) 
-        print(f"Índice limpiado exitosamente.")
-    except Exception as e:
-        print(f"Nota sobre borrado (Intentando método alternativo): {e}")
-        try:
-            # Intento de borrado vía REST API como respaldo
-            import requests
-            print("Intentando limpiar índice vía REST API...")
-            # Necesitamos el hostname del índice. Pinecone 3.0+ lo requiere o lo busca.
-            # Este es un fallback simplificado.
-            print("Por favor verifica el índice en el panel de Pinecone si el borrado falló.")
-        except:
-            pass
+def get_pinecone_index():
+    from pinecone import Pinecone
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    return pc.Index(PINECONE_INDEX_NAME)
+
+
+def obtener_ids_existentes():
+    """IDs de los vectores actuales, para borrarlos recién después de subir los nuevos."""
+    index = get_pinecone_index()
+    ids = [vector_id for batch in index.list() for vector_id in batch]
+    print(f"Vectores existentes en el índice: {len(ids)}")
+    return ids
 
 
 def crear_y_almacenar_vectores(chunks):
     from langchain_pinecone import PineconeVectorStore
     if not chunks:
-        return
+        raise ValueError("No se generaron chunks; no se toca el índice.")
     print(f"Subiendo {len(chunks)} vectores a Pinecone...")
     embedding_function = get_embedding_model()
-    PineconeVectorStore.from_documents(
-        documents=chunks,
+    vectorstore = PineconeVectorStore(
+        index=get_pinecone_index(),
         embedding=embedding_function,
-        index_name=PINECONE_INDEX_NAME,
     )
+    vectorstore.add_documents(chunks, ids=[str(uuid.uuid4()) for _ in chunks])
     print("¡Carga a Pinecone completada!")
+
+
+def borrar_vectores_viejos(ids_viejos):
+    """Borra solo los vectores previos. Si falla, el índice queda con datos viejos y nuevos, nunca vacío."""
+    if not ids_viejos:
+        return
+    print(f"Borrando {len(ids_viejos)} vectores antiguos...")
+    index = get_pinecone_index()
+    for i in range(0, len(ids_viejos), 1000):
+        index.delete(ids=ids_viejos[i : i + 1000])
+    print("Vectores antiguos eliminados.")
 
 
 def limpiar_archivo_local():

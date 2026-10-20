@@ -52,10 +52,12 @@ _ES_HINTS = {
     "contame", "sobre", "del", "una", "unos", "unas", "los", "las", "por",
     "para", "su", "sus", "el", "la", "de", "en", "es", "con",
 }
+# Las tildes del nombre propio no indican idioma ("Where does Matías work?" es inglés)
+_NAME_RE = re.compile(r"\b(mat[ií]as|rodr[ií]guez|c[aá]rdenas)\b")
 
 def detect_language(text: str) -> str:
     """Devuelve 'en' o 'es' según la pregunta del usuario."""
-    raw = (text or "").strip().lower()
+    raw = _NAME_RE.sub(" ", (text or "").strip().lower()).strip()
     if not raw:
         return "es"
     compact = re.sub(r"[^a-záéíóúüñ\s]", " ", raw)
