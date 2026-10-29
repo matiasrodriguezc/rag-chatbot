@@ -218,7 +218,8 @@ def get_rag_chain(model_name: str):
         chat = ChatGoogleGenerativeAI(
             model=model_name,
             temperature=0.2,
-            max_tokens=800,
+            # 2.5-flash cuenta su razonamiento dentro de este límite; con 800 cortaba respuestas
+            max_tokens=4000,
             disable_streaming=True,
             # Ante un 429 conviene pasar al siguiente modelo de LLM_MODELS en vez de reintentar ~2 min
             max_retries=1,
