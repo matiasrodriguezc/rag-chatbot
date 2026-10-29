@@ -13,6 +13,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableLambda
 from fastapi.middleware.cors import CORSMiddleware
 from pinecone import Pinecone
 import re
@@ -33,6 +34,10 @@ GEMINI_MODELS = [
     ).split(",")
     if m.strip()
 ]
+
+# Claude va al final: solo responde si los modelos de Gemini fallan o se quedan sin cuota
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5")
+LLM_MODELS = GEMINI_MODELS + ([CLAUDE_MODEL] if os.environ.get("ANTHROPIC_API_KEY") else [])
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY no encontrada. Asegúrate de que esté en .env o en las variables de entorno.")
@@ -130,6 +135,28 @@ def get_context_chain():
     retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 5, "lambda_mult": 0.7})
     return retriever | format_docs
 
+@lru_cache(maxsize=1)
+def get_anthropic_client():
+    from anthropic import AsyncAnthropic
+    # Un solo reintento, igual que con Gemini: es el último respaldo
+    return AsyncAnthropic(max_retries=1)
+
+def claude_llm(model_name: str):
+    """Llama a Claude con el SDK oficial y devuelve solo el texto."""
+    async def ask_claude(prompt) -> str:
+        response = await get_anthropic_client().messages.create(
+            model=model_name,
+            # Incluye el razonamiento del modelo; con 800 la respuesta se cortaría
+            max_tokens=4000,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": prompt.to_string()}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"{model_name} rechazó la respuesta")
+        return "".join(block.text for block in response.content if block.type == "text")
+
+    return RunnableLambda(ask_claude)
+
 @lru_cache(maxsize=4)
 def get_rag_chain(model_name: str):
     """Construye el borrador y la verificación contra el contexto (Self-RAG)."""
@@ -185,14 +212,17 @@ def get_rag_chain(model_name: str):
         FINAL ANSWER:
     """
 
-    chat = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0.2,
-        max_tokens=800,
-        disable_streaming=True,
-        # Ante un 429 conviene pasar al siguiente modelo de GEMINI_MODELS en vez de reintentar ~2 min
-        max_retries=1,
-    )
+    if model_name.startswith("claude"):
+        chat = claude_llm(model_name)
+    else:
+        chat = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=0.2,
+            max_tokens=800,
+            disable_streaming=True,
+            # Ante un 429 conviene pasar al siguiente modelo de LLM_MODELS en vez de reintentar ~2 min
+            max_retries=1,
+        )
 
     # Ambas reciben {context, question, language}; la verificación además el {draft}
     draft_chain = PromptTemplate.from_template(DRAFT_TEMPLATE) | chat | StrOutputParser()
@@ -234,7 +264,7 @@ async def generate_answer(pregunta_texto: str, lang_code: str) -> str:
         if lang_code == "en"
         else "No pude generar una respuesta. Intentá de nuevo en unos segundos."
     )
-    for model_name in GEMINI_MODELS:
+    for model_name in LLM_MODELS:
         try:
             print(f"Intentando modelo: {model_name} (idioma={payload['language']})")
             if "context" not in payload:

@@ -27,6 +27,7 @@ Unlike traditional RAG chatbots that read static PDFs, this system implements a 
 | **Backend** | `FastAPI` | High-performance async API framework. |
 | **AI Orchestration** | `LangChain` | RAG chain management and prompt engineering. |
 | **LLM** | `Google Gemini 2.5 Flash` | Fast and efficient generative model. |
+| **LLM fallback** | `Claude Haiku 5.5` | Answers only when every Gemini model fails or runs out of quota. |
 | **Vector DB** | `Pinecone` | Semantic search and vector storage. |
 | **Embeddings** | `Hugging Face` | `all-MiniLM-L6-v2` model via Inference Endpoints. |
 | **ETL Pipeline** | `GitHub Actions` + `Python` | Automated extraction from Google Docs to Pinecone. |
@@ -48,7 +49,7 @@ Unlike traditional RAG chatbots that read static PDFs, this system implements a 
 ### Prerequisites
 * Python 3.11+
 * Docker (Optional)
-* API Keys: Pinecone, Hugging Face Token, Google Gemini API Key.
+* API Keys: Pinecone, Hugging Face Token, Google Gemini API Key, Anthropic API Key (optional).
 
 ### 1. Clone the Repository
 ```bash
@@ -66,6 +67,7 @@ PINECONE_API_KEY="your_pinecone_key"
 PINECONE_INDEX_NAME="cv-matias"
 HF_TOKEN="your_huggingface_token"
 GOOGLE_API_KEY="your_google_gemini_key"
+ANTHROPIC_API_KEY="your_anthropic_key" # Optional: enables the Claude fallback
 GOOGLE_DOC_ID="your_google_doc_id" # Only needed for running ETL locally
 
 ```
