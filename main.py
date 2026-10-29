@@ -138,8 +138,9 @@ def get_context_chain():
 @lru_cache(maxsize=1)
 def get_anthropic_client():
     from anthropic import AsyncAnthropic
-    # Un solo reintento, igual que con Gemini: es el último respaldo
-    return AsyncAnthropic(max_retries=1)
+    # Un solo reintento, igual que con Gemini: es el último respaldo.
+    # Sin timeout el SDK espera hasta 10 min por llamada y el chat queda mudo.
+    return AsyncAnthropic(max_retries=1, timeout=60)
 
 def claude_llm(model_name: str):
     """Llama a Claude con el SDK oficial y devuelve solo el texto."""
@@ -269,7 +270,12 @@ async def generate_answer(pregunta_texto: str, lang_code: str) -> str:
         try:
             print(f"Intentando modelo: {model_name} (idioma={payload['language']})")
             if "context" not in payload:
-                payload["context"] = await get_context_chain().ainvoke(pregunta_texto)
+                # El camino async de langchain-pinecone comparte una sesión entre requests:
+                # con dos preguntas a la vez, todas menos una se cuelgan para siempre.
+                payload["context"] = await asyncio.wait_for(
+                    asyncio.to_thread(get_context_chain().invoke, pregunta_texto),
+                    timeout=30,
+                )
             verify_chain, draft_chain = get_rag_chain(model_name)
             draft = await draft_chain.ainvoke(payload)
             try:
