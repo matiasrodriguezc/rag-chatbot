@@ -4,13 +4,11 @@ python-dotenv
 requests
 # Nuevas librerías de LangChain 
 langchain-google-genai
-langchain-huggingface
 langchain-text-splitters
 langchain-pinecone
 # Claude como respaldo cuando Gemini se queda sin cuota
 anthropic
 # Pinecone
 pinecone-client
-# Dependencia para embeddings locales
-sentence-transformers
-huggingface_hub
+# Embeddings locales en ONNX (MiniLM sin torch)
+fastembed

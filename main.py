@@ -4,16 +4,17 @@ from functools import lru_cache
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
+import time
 from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi.responses import StreamingResponse
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
+from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableLambda
+from fastembed import TextEmbedding
 from fastapi.middleware.cors import CORSMiddleware
 from pinecone import Pinecone
 import re
@@ -93,15 +94,28 @@ class Pregunta(BaseModel):
     texto: str
 
 # --- Lógica de Carga ---
+class MiniLMEmbeddings(Embeddings):
+    """MiniLM en ONNX con fastembed: los mismos vectores que sentence-transformers, sin torch.
+    Con torch la imagen tardaba ~1 min en arrancar y casi no entraba en la RAM de Koyeb."""
+
+    def __init__(self):
+        # Un solo hilo: con 0.1 vCPU los hilos de onnxruntime agotan la cuota y frenan todo el proceso
+        self._model = TextEmbedding(
+            EMBEDDING_MODEL_NAME,
+            cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"),
+            threads=1,
+        )
+
+    def embed_documents(self, texts):
+        return [vector.tolist() for vector in self._model.embed(list(texts))]
+
+    def embed_query(self, text):
+        return self.embed_documents([text])[0]
+
 @lru_cache(maxsize=1)
 def get_embedding_model():
     """Embeddings locales (mismo modelo que Pinecone). Evita la Inference API de Hugging Face."""
-    local_only = os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true")
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={"device": "cpu", "local_files_only": local_only},
-        encode_kwargs={"normalize_embeddings": False},
-    )
+    return MiniLMEmbeddings()
 
 def _pinecone_host() -> str:
     raw = (PINECONE_INDEX_HOST or "").strip().strip('"').strip("'")
@@ -126,7 +140,7 @@ def format_docs(docs) -> str:
 
 @lru_cache(maxsize=1)
 def get_context_chain():
-    """Recupera los chunks una sola vez: los usan el borrador y la verificación."""
+    """Recupera los chunks de Pinecone y los une en un solo texto de contexto."""
     embedding_function = get_embedding_model()
     vectorstore = PineconeVectorStore(
         index=get_pinecone_index(),
@@ -142,101 +156,80 @@ def get_anthropic_client():
     # Sin timeout el SDK espera hasta 10 min por llamada y el chat queda mudo.
     return AsyncAnthropic(max_retries=1, timeout=60)
 
-def claude_llm(model_name: str):
-    """Llama a Claude con el SDK oficial y devuelve solo el texto."""
-    async def ask_claude(prompt) -> str:
-        response = await get_anthropic_client().messages.create(
-            model=model_name,
-            # Incluye el razonamiento del modelo; con 800 la respuesta se cortaría
-            max_tokens=4000,
-            output_config={"effort": "low"},
-            messages=[{"role": "user", "content": prompt.to_string()}],
-        )
-        if response.stop_reason == "refusal":
-            raise RuntimeError(f"{model_name} rechazó la respuesta")
-        return "".join(block.text for block in response.content if block.type == "text")
+async def stream_claude(model_name: str, prompt: str):
+    """Llama a Claude con el SDK oficial y va devolviendo el texto a medida que llega."""
+    async with get_anthropic_client().messages.stream(
+        model=model_name,
+        # Incluye el razonamiento del modelo; con 800 la respuesta se cortaría
+        max_tokens=4000,
+        output_config={"effort": "low"},
+        messages=[{"role": "user", "content": prompt}],
+    ) as stream:
+        async for text in stream.text_stream:
+            yield text
 
-    return RunnableLambda(ask_claude)
+# Una sola llamada al LLM: antes había un borrador y una verificación en serie, que duplicaban la espera.
+# Las reglas de la verificación (nada que no esté en el contexto) ahora van en este mismo prompt.
+ANSWER_PROMPT = PromptTemplate.from_template("""
+    You are Matías Rodríguez's AI assistant.
+    Answer the question using ONLY the context. Be direct and professional.
+    Maximum 3 sentences. No bullets.
+
+    FACTS (mandatory):
+    - Every claim must be stated in the context. Never add a tool, company, date,
+      number or detail the context does not mention.
+    - If the context does not answer the question, say briefly that this
+      information is not available about Matías.
+    - Copy every date, year, number and name exactly as written in the context.
+    - The context is up to date: a recent year is correct, never replace it with an earlier one.
+
+    LANGUAGE (mandatory):
+    - The user wrote in {language}.
+    - Write the ENTIRE answer in {language}. Do not mix languages.
+    - If {language} is English, use no Spanish.
+    - If {language} is Spanish, use no English.
+
+    Context:
+    {context}
+
+    Question:
+    {question}
+""")
 
 @lru_cache(maxsize=4)
-def get_rag_chain(model_name: str):
-    """Construye el borrador y la verificación contra el contexto (Self-RAG)."""
+def get_gemini_chain(model_name: str):
+    chat = ChatGoogleGenerativeAI(
+        model=model_name,
+        temperature=0.2,
+        # 2.5-flash cuenta su razonamiento dentro de este límite; con 800 cortaba respuestas
+        max_tokens=4000,
+        # Para 3 oraciones sacadas del contexto el razonamiento solo suma segundos
+        thinking_budget=0 if "2.5-flash" in model_name else None,
+        # Ante un 429 conviene pasar al siguiente modelo de LLM_MODELS en vez de reintentar ~2 min
+        max_retries=1,
+    )
+    return ANSWER_PROMPT | chat | StrOutputParser()
 
-    DRAFT_TEMPLATE = """
-        You are Matías Rodríguez's AI assistant.
-        Answer using ONLY the context. Be direct and professional.
-        Maximum 3 sentences. No bullets.
-
-        FACTS (mandatory):
-        - Copy every date, year, number and name exactly as written in the context.
-        - The context is up to date: a recent year is correct, never replace it with an earlier one.
-
-        LANGUAGE (mandatory):
-        - The user wrote in {language}.
-        - Write the ENTIRE answer in {language}. Do not mix languages.
-        - If {language} is English, use no Spanish.
-        - If {language} is Spanish, use no English.
-
-        Context:
-        {context}
-
-        Question:
-        {question}
-    """
-
-    REFINE_TEMPLATE = """
-        You are the fact-checker and editor for Matías Rodríguez's chatbot.
-
-        RULES:
-        1. Check every claim in the draft against the CONTEXT. Remove any claim,
-           detail, tool, company, date or number the CONTEXT does not state.
-           Do not add anything that is not in the CONTEXT.
-        2. If nothing in the draft is supported by the CONTEXT, say briefly that
-           this information is not available about Matías.
-        3. If the draft is cut off, complete it using only the CONTEXT.
-        4. The user's question is in {language}. The final answer MUST be 100% in {language}.
-           If the draft is in the wrong language, translate it.
-        5. If the draft is redundant, compress it. Maximum 3 sentences. No bullets.
-        6. Copy every date, year, number and name exactly as written in the CONTEXT.
-           The CONTEXT is up to date: a recent year is correct, never replace it with an earlier one.
-        7. Do not mention editing or checking. Return only the final text.
-
-        CONTEXT:
-        {context}
-
-        QUESTION:
-        {question}
-
-        DRAFT:
-        {draft}
-
-        FINAL ANSWER:
-    """
-
+def stream_model(model_name: str, payload: dict):
     if model_name.startswith("claude"):
-        chat = claude_llm(model_name)
-    else:
-        chat = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0.2,
-            # 2.5-flash cuenta su razonamiento dentro de este límite; con 800 cortaba respuestas
-            max_tokens=4000,
-            disable_streaming=True,
-            # Ante un 429 conviene pasar al siguiente modelo de LLM_MODELS en vez de reintentar ~2 min
-            max_retries=1,
-        )
+        return stream_claude(model_name, ANSWER_PROMPT.format(**payload))
+    return get_gemini_chain(model_name).astream(payload)
 
-    # Ambas reciben {context, question, language}; la verificación además el {draft}
-    draft_chain = PromptTemplate.from_template(DRAFT_TEMPLATE) | chat | StrOutputParser()
-    verify_chain = PromptTemplate.from_template(REFINE_TEMPLATE) | chat | StrOutputParser()
-
-    return verify_chain, draft_chain
+def warm_up():
+    """Conecta Pinecone y hace una búsqueda de prueba para que la primera pregunta no pague el arranque."""
+    try:
+        get_context_chain().invoke("experiencia laboral")
+        print("Pinecone listo")
+    except Exception as e:
+        print(f"Precalentamiento de Pinecone falló: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Solo MiniLM. Pinecone/Gemini se conectan en el primer /ask para no tumbar el health check.
+    # MiniLM antes de aceptar pedidos; Pinecone en segundo plano para no demorar el health check.
     get_embedding_model()
+    warm_up_task = asyncio.create_task(asyncio.to_thread(warm_up))
     yield
+    warm_up_task.cancel()
 
 app = FastAPI(title="Chatbot de CV", lifespan=lifespan)
 
@@ -255,56 +248,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def generate_answer(pregunta_texto: str, lang_code: str) -> str:
+async def stream_answer(pregunta_texto: str, lang_code: str):
+    """Manda el texto apenas el modelo lo genera. Si un modelo falla antes de escribir algo, prueba el siguiente."""
     payload = {
         "question": pregunta_texto,
         "language": language_name(lang_code),
     }
-    last_error = None
-    empty_fallback = (
-        "I couldn't generate an answer. Please try again in a few seconds."
-        if lang_code == "en"
-        else "No pude generar una respuesta. Intentá de nuevo en unos segundos."
+    # El camino async de langchain-pinecone comparte una sesión entre requests:
+    # con dos preguntas a la vez, todas menos una se cuelgan para siempre.
+    start = time.perf_counter()
+    payload["context"] = await asyncio.wait_for(
+        asyncio.to_thread(get_context_chain().invoke, pregunta_texto),
+        timeout=30,
     )
+    print(f"Contexto de Pinecone en {time.perf_counter() - start:.1f}s")
+    last_error = None
     for model_name in LLM_MODELS:
+        sent = False
         try:
             print(f"Intentando modelo: {model_name} (idioma={payload['language']})")
-            if "context" not in payload:
-                # El camino async de langchain-pinecone comparte una sesión entre requests:
-                # con dos preguntas a la vez, todas menos una se cuelgan para siempre.
-                payload["context"] = await asyncio.wait_for(
-                    asyncio.to_thread(get_context_chain().invoke, pregunta_texto),
-                    timeout=30,
-                )
-            verify_chain, draft_chain = get_rag_chain(model_name)
-            draft = await draft_chain.ainvoke(payload)
-            try:
-                text = await verify_chain.ainvoke({**payload, "draft": draft})
-            except Exception as verify_error:
-                print(f"Verificación falló ({model_name}): {verify_error}. Uso el borrador.")
-                text = draft
-            if text and str(text).strip():
-                return str(text).strip()
+            async for piece in stream_model(model_name, payload):
+                if piece:
+                    if not sent:
+                        print(f"Primer texto de {model_name} a los {time.perf_counter() - start:.1f}s")
+                    sent = True
+                    yield piece
+            if sent:
+                print(f"Respuesta completa a los {time.perf_counter() - start:.1f}s")
+                return
             print(f"Modelo {model_name} devolvió una respuesta vacía")
         except Exception as e:
+            # Con parte de la respuesta ya enviada no se puede empezar de nuevo con otro modelo
+            if sent:
+                raise
             last_error = e
             print(f"Modelo {model_name} falló: {e}")
     if last_error:
         raise last_error
-    return empty_fallback
+    yield (
+        "I couldn't generate an answer. Please try again in a few seconds."
+        if lang_code == "en"
+        else "No pude generar una respuesta. Intentá de nuevo en unos segundos."
+    )
 
 async def stream_rag_response(pregunta_texto: str):
-    """Genera la respuesta completa y la envía en chunks (evita el stream vacío de Gemini 3 + AFC)."""
     lang_code = detect_language(pregunta_texto)
+    sent = []
     try:
-        text = await generate_answer(pregunta_texto, lang_code)
+        async for piece in stream_answer(pregunta_texto, lang_code):
+            sent.append(piece)
+            yield piece
+        text = "".join(sent)
         print(f"Respuesta ({len(text)} chars, {lang_code}): {text[:200]}")
-        for i in range(0, len(text), 16):
-            yield text[i : i + 16]
-            await asyncio.sleep(0.01)
     except Exception as e:
         print(f"Error durante el streaming: {e}")
-        yield user_error_message(lang_code)
+        if not sent:
+            yield user_error_message(lang_code)
 
 @app.post("/ask")
 async def ask_cv(pregunta: Pregunta):

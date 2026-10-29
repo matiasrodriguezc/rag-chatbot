@@ -2,7 +2,10 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Koyeb free tier has 0.1 vCPU: extra BLAS/ONNX threads only burn the CPU quota
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
 
 WORKDIR /app
 
@@ -12,13 +15,11 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements-api.txt /app/requirements.txt
 
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
 RUN pip install -r /app/requirements.txt
 
-# Cache MiniLM in the image so Koyeb never calls Hugging Face Inference or Hub at runtime.
-ENV HF_HOME=/app/.cache/huggingface
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+# Cache MiniLM (ONNX, no torch) in the image so Koyeb never calls Hugging Face at runtime.
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/all-MiniLM-L6-v2', cache_dir='/app/.cache/fastembed')"
 ENV HF_HUB_OFFLINE=1
 
 COPY . /app/
