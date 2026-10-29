@@ -15,7 +15,6 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from fastapi.middleware.cors import CORSMiddleware
 from pinecone import Pinecone
-from operator import itemgetter
 import re
 
 # --- CONFIGURACIÓN ---
@@ -117,15 +116,23 @@ def get_pinecone_index():
     pc = Pinecone(api_key=PINECONE_API_KEY)
     return pc.Index(host=_pinecone_host())
 
-@lru_cache(maxsize=4)
-def get_rag_chain(model_name: str):
-    """Construye y devuelve la cadena RAG con Self-Refinement."""
+def format_docs(docs) -> str:
+    return "\n\n---\n\n".join(doc.page_content for doc in docs)
+
+@lru_cache(maxsize=1)
+def get_context_chain():
+    """Recupera los chunks una sola vez: los usan el borrador y la verificación."""
     embedding_function = get_embedding_model()
     vectorstore = PineconeVectorStore(
         index=get_pinecone_index(),
         embedding=embedding_function,
     )
     retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 5, "lambda_mult": 0.7})
+    return retriever | format_docs
+
+@lru_cache(maxsize=4)
+def get_rag_chain(model_name: str):
+    """Construye el borrador y la verificación contra el contexto (Self-RAG)."""
 
     DRAFT_TEMPLATE = """
         You are Matías Rodríguez's AI assistant.
@@ -150,16 +157,24 @@ def get_rag_chain(model_name: str):
     """
 
     REFINE_TEMPLATE = """
-        You are an editor for Matías Rodríguez's chatbot.
+        You are the fact-checker and editor for Matías Rodríguez's chatbot.
 
         RULES:
-        1. If the draft is cut off, complete it.
-        2. The user's question is in {language}. The final answer MUST be 100% in {language}.
+        1. Check every claim in the draft against the CONTEXT. Remove any claim,
+           detail, tool, company, date or number the CONTEXT does not state.
+           Do not add anything that is not in the CONTEXT.
+        2. If nothing in the draft is supported by the CONTEXT, say briefly that
+           this information is not available about Matías.
+        3. If the draft is cut off, complete it using only the CONTEXT.
+        4. The user's question is in {language}. The final answer MUST be 100% in {language}.
            If the draft is in the wrong language, translate it.
-        3. If the draft is redundant, compress it.
-        4. Never change any date, year, number or name from the draft. They come from
-           an up-to-date source and are correct, even if they seem recent to you.
-        5. Do not mention editing. Return only the final text.
+        5. If the draft is redundant, compress it. Maximum 3 sentences. No bullets.
+        6. Copy every date, year, number and name exactly as written in the CONTEXT.
+           The CONTEXT is up to date: a recent year is correct, never replace it with an earlier one.
+        7. Do not mention editing or checking. Return only the final text.
+
+        CONTEXT:
+        {context}
 
         QUESTION:
         {question}
@@ -179,29 +194,11 @@ def get_rag_chain(model_name: str):
         max_retries=1,
     )
 
-    draft_chain = (
-        {
-            "context": itemgetter("question") | retriever,
-            "question": itemgetter("question"),
-            "language": itemgetter("language"),
-        }
-        | PromptTemplate.from_template(DRAFT_TEMPLATE)
-        | chat
-        | StrOutputParser()
-    )
+    # Ambas reciben {context, question, language}; la verificación además el {draft}
+    draft_chain = PromptTemplate.from_template(DRAFT_TEMPLATE) | chat | StrOutputParser()
+    verify_chain = PromptTemplate.from_template(REFINE_TEMPLATE) | chat | StrOutputParser()
 
-    refined_chain = (
-        {
-            "draft": draft_chain,
-            "question": itemgetter("question"),
-            "language": itemgetter("language"),
-        }
-        | PromptTemplate.from_template(REFINE_TEMPLATE)
-        | chat
-        | StrOutputParser()
-    )
-
-    return refined_chain, draft_chain
+    return verify_chain, draft_chain
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -240,12 +237,15 @@ async def generate_answer(pregunta_texto: str, lang_code: str) -> str:
     for model_name in GEMINI_MODELS:
         try:
             print(f"Intentando modelo: {model_name} (idioma={payload['language']})")
-            refined_chain, draft_chain = get_rag_chain(model_name)
+            if "context" not in payload:
+                payload["context"] = await get_context_chain().ainvoke(pregunta_texto)
+            verify_chain, draft_chain = get_rag_chain(model_name)
+            draft = await draft_chain.ainvoke(payload)
             try:
-                text = await refined_chain.ainvoke(payload)
-            except Exception as refine_error:
-                print(f"Refine falló ({model_name}): {refine_error}. Uso el borrador.")
-                text = await draft_chain.ainvoke(payload)
+                text = await verify_chain.ainvoke({**payload, "draft": draft})
+            except Exception as verify_error:
+                print(f"Verificación falló ({model_name}): {verify_error}. Uso el borrador.")
+                text = draft
             if text and str(text).strip():
                 return str(text).strip()
             print(f"Modelo {model_name} devolvió una respuesta vacía")
