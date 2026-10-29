@@ -60,15 +60,30 @@ _ES_HINTS = {
 # Las tildes del nombre propio no indican idioma ("Where does Matías work?" es inglés)
 _NAME_RE = re.compile(r"\b(mat[ií]as|rodr[ií]guez|c[aá]rdenas)\b")
 
+_EN_GREETINGS = {
+    "hi", "hey", "hello", "yo", "sup", "hiya", "hi there", "hello there",
+    "good morning", "good afternoon", "good evening",
+}
+_ES_GREETINGS = {
+    "hola", "holis", "buenas", "buen dia", "buen día", "buenos dias", "buenos días",
+    "buenas tardes", "buenas noches", "hola que tal", "hola qué tal",
+}
+
+def _without_name(text: str) -> str:
+    return _NAME_RE.sub(" ", (text or "").strip().lower()).strip()
+
+def _only_words(raw: str) -> str:
+    return " ".join(re.sub(r"[^a-záéíóúüñ\s]", " ", raw).split())
+
 def detect_language(text: str) -> str:
     """Devuelve 'en' o 'es' según la pregunta del usuario."""
-    raw = _NAME_RE.sub(" ", (text or "").strip().lower()).strip()
+    raw = _without_name(text)
     if not raw:
         return "es"
-    compact = re.sub(r"[^a-záéíóúüñ\s]", " ", raw)
-    if compact.strip() in {"hi", "hey", "hello", "yo", "sup", "hiya"}:
+    compact = _only_words(raw)
+    if compact in _EN_GREETINGS:
         return "en"
-    if compact.strip() in {"hola", "holis", "buenas", "buen dia", "buen día"}:
+    if compact in _ES_GREETINGS:
         return "es"
     if re.search(r"[áéíóúüñ¿¡]", raw):
         return "es"
@@ -80,6 +95,14 @@ def detect_language(text: str) -> str:
     if es_score > en_score:
         return "es"
     return "en" if re.fullmatch(r"[a-z\s']+", compact.strip()) else "es"
+
+def greeting_reply(text: str, lang_code: str):
+    """Un saludo solo no necesita Pinecone ni el LLM: se contesta al instante."""
+    if _only_words(_without_name(text)) not in _EN_GREETINGS | _ES_GREETINGS:
+        return None
+    if lang_code == "en":
+        return "Hi! I'm Matías's assistant. Ask me about his experience, projects or skills."
+    return "¡Hola! Soy el asistente de Matías. Preguntame por su experiencia, proyectos o habilidades."
 
 def language_name(code: str) -> str:
     return "English" if code == "en" else "Spanish"
@@ -178,8 +201,11 @@ ANSWER_PROMPT = PromptTemplate.from_template("""
     FACTS (mandatory):
     - Every claim must be stated in the context. Never add a tool, company, date,
       number or detail the context does not mention.
-    - If the context does not answer the question, say briefly that this
-      information is not available about Matías.
+    - If the context does not answer the question, say briefly that you don't
+      have that information about Matías.
+    - If the user is only making small talk, reply in one friendly sentence and
+      invite them to ask about Matías's experience, projects or skills.
+    - Never mention the context, documents or sources.
     - Copy every date, year, number and name exactly as written in the context.
     - The context is up to date: a recent year is correct, never replace it with an earlier one.
 
@@ -293,6 +319,10 @@ async def stream_answer(pregunta_texto: str, lang_code: str):
 
 async def stream_rag_response(pregunta_texto: str):
     lang_code = detect_language(pregunta_texto)
+    greeting = greeting_reply(pregunta_texto, lang_code)
+    if greeting:
+        yield greeting
+        return
     sent = []
     try:
         async for piece in stream_answer(pregunta_texto, lang_code):
